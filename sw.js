@@ -1,6 +1,7 @@
 // Service worker: houdt de app beschikbaar zonder internet.
-// Verhoog VERSION bij elke wijziging aan de bestanden, anders blijft de oude versie hangen.
-var VERSION = 'verzamelbak-v1';
+// Netwerk eerst: je krijgt altijd de nieuwste versie als je online bent,
+// en de laatst bewaarde versie als je offline bent.
+var VERSION = 'verzamelbak-v2';
 var FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
@@ -21,6 +22,10 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
   e.respondWith(
-    caches.match(e.request).then(function (hit) { return hit || fetch(e.request); })
+    fetch(e.request).then(function (res) {
+      var copy = res.clone();
+      caches.open(VERSION).then(function (c) { c.put(e.request, copy); });
+      return res;
+    }).catch(function () { return caches.match(e.request); })
   );
 });

@@ -19,9 +19,11 @@
     --card: #fffdf8;
     --accent: #b5482a;
     --line: #ddd4c4;
+    --word-l: 36%;   /* helderheid van de woordkleuren */
   }
   @media (prefers-color-scheme: dark) {
     :root {
+      --word-l: 68%;
       --bg: #1d1b18;
       --ink: #efe8da;
       --ink-soft: #8d8576;
@@ -41,19 +43,20 @@
   /* De wolk */
   #cloud {
     min-height: 100vh;
-    padding: 12vh 20px 160px;
+    max-width: 640px;          /* smal genoeg om over meerdere regels te vallen */
+    margin: 0 auto;
+    padding: 10vh 20px 160px;
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
     align-content: center;
     align-items: center;
-    gap: 6px 18px;
   }
   .word {
     background: none;
     border: 0;
     font: inherit;
-    color: var(--ink);
+    color: hsl(var(--hue, 20), 58%, var(--word-l));
     padding: 2px 4px;
     line-height: 1.15;
     cursor: pointer;
@@ -62,11 +65,11 @@
     transition: transform .2s ease;
   }
   .word:active { transform: scale(.96) !important; }
-  .w1 { font-size: 15px; opacity: .55; }
-  .w2 { font-size: 20px; opacity: .72; }
-  .w3 { font-size: 27px; opacity: .88; }
+  .w1 { font-size: 15px; opacity: .6; }
+  .w2 { font-size: 20px; opacity: .78; }
+  .w3 { font-size: 27px; opacity: .92; }
   .w4 { font-size: 36px; font-weight: 700; }
-  .w5 { font-size: 46px; font-weight: 700; color: var(--accent); }
+  .w5 { font-size: 46px; font-weight: 700; }
 
   .empty {
     color: var(--ink-soft);
@@ -173,7 +176,7 @@
 <!-- Nieuw item -->
 <dialog id="addDlg">
   <h2>Wat gaat de emmer in?</h2>
-  <textarea id="addText" placeholder="Taak, belofte of idee…"></textarea>
+  <textarea id="addText" placeholder="Taak, belofte of idee… (de eerste regel is het onderwerp; in de wolk zie je maximaal twee woorden)"></textarea>
   <div class="row">
     <button class="btn quiet" id="addCancel">Annuleer</button>
     <button class="btn primary" id="addSave">Erin</button>
@@ -223,19 +226,32 @@
   }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
-  // Vaste "willekeur" per item, zodat de wolk niet bij elke render verspringt
+  // Vaste "willekeur" per item, zodat de wolk niet bij elke render verspringt.
+  // Goede menging: items die vlak na elkaar zijn toegevoegd krijgen toch heel andere waarden.
   function hash(s) {
-    var h = 0;
-    for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
-    return Math.abs(h);
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    h ^= h >>> 13; h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 16; h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+    return h >>> 0;
   }
+  // Onafhankelijke waarde tussen 0 en 1 per item en per eigenschap
+  function rnd(id, k) { return hash(id + ':' + k) / 4294967296; }
+
+  // Kleuren: een vaste set tinten, zodat het kleurrijk maar rustig blijft
+  var HUES = [12, 28, 42, 95, 150, 180, 205, 230, 265, 300, 335];
 
   var $ = function (id) { return document.getElementById(id); };
   var cloud = $('cloud');
 
+  // Onderwerp in de wolk: maximaal twee woorden.
+  // Staat er een eerste regel, dan geldt die als onderwerp; anders de eerste twee woorden.
   function shortLabel(text) {
-    var t = text.trim().replace(/\s+/g, ' ');
-    return t.length > 42 ? t.slice(0, 40) + '…' : t;
+    var first = text.trim().split(/\n/)[0].trim();
+    var words = first.split(/\s+/).filter(Boolean);
+    var label = words.slice(0, 2).join(' ');
+    return label.length > 28 ? label.slice(0, 26) + '…' : label;
   }
 
   function render() {
@@ -251,14 +267,29 @@
       // Mengvolgorde is stabiel (op hash), zodat het amorf oogt maar niet verspringt
       active.slice().sort(function (a, b) { return hash(a.id) - hash(b.id); })
         .forEach(function (item) {
-          var h = hash(item.id);
+          var id = item.id;
           var b = document.createElement('button');
           b.className = 'word w' + item.w;
           b.textContent = shortLabel(item.text);
-          var rot = (h % 9) - 4;                 // -4 .. +4 graden
-          var dy = ((h >> 3) % 21) - 10;         // -10 .. +10 px
-          b.style.transform = 'rotate(' + rot + 'deg) translateY(' + dy + 'px)';
-          b.addEventListener('click', function () { openItem(item.id); });
+
+          // Kleur
+          b.style.setProperty('--hue', HUES[Math.floor(rnd(id, 'hue') * HUES.length)]);
+
+          // Schuinte: wisselend links en rechts, soms vrijwel recht
+          var rot = (rnd(id, 'rot') - 0.5) * 2 * 13;       // -13 .. +13 graden
+          if (rnd(id, 'flat') < 0.25) rot *= 0.15;          // een kwart staat bijna recht
+
+          // Hoger of lager ten opzichte van de buren
+          var dy = (rnd(id, 'dy') - 0.5) * 2 * 34;          // -34 .. +34 px
+          var dx = (rnd(id, 'dx') - 0.5) * 2 * 10;          // -10 .. +10 px
+
+          // Ruimte rondom, per woord anders
+          var my = 2 + rnd(id, 'my') * 26;                  // 2 .. 28 px boven en onder
+          var mx = 4 + rnd(id, 'mx') * 22;                  // 4 .. 26 px links en rechts
+
+          b.style.margin = my.toFixed(0) + 'px ' + mx.toFixed(0) + 'px';
+          b.style.transform = 'translate(' + dx.toFixed(0) + 'px,' + dy.toFixed(0) + 'px) rotate(' + rot.toFixed(1) + 'deg)';
+          b.addEventListener('click', function () { openItem(id); });
           cloud.appendChild(b);
         });
     }
