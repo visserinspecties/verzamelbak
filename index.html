@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Verzamelbak</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Verzamelbak">
+<meta name="theme-color" content="#f4efe6">
+<style>
+  :root {
+    --bg: #f4efe6;
+    --ink: #2b2620;
+    --ink-soft: #8a8174;
+    --card: #fffdf8;
+    --accent: #b5482a;
+    --line: #ddd4c4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1d1b18;
+      --ink: #efe8da;
+      --ink-soft: #8d8576;
+      --card: #292622;
+      --accent: #e0714f;
+      --line: #3b372f;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: Merriweather, Georgia, "Times New Roman", serif;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+    overflow-x: hidden;
+  }
+
+  /* De wolk */
+  #cloud {
+    min-height: 100vh;
+    padding: 12vh 20px 160px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: center;
+    align-items: center;
+    gap: 6px 18px;
+  }
+  .word {
+    background: none;
+    border: 0;
+    font: inherit;
+    color: var(--ink);
+    padding: 2px 4px;
+    line-height: 1.15;
+    cursor: pointer;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    transition: transform .2s ease;
+  }
+  .word:active { transform: scale(.96) !important; }
+  .w1 { font-size: 15px; opacity: .55; }
+  .w2 { font-size: 20px; opacity: .72; }
+  .w3 { font-size: 27px; opacity: .88; }
+  .w4 { font-size: 36px; font-weight: 700; }
+  .w5 { font-size: 46px; font-weight: 700; color: var(--accent); }
+
+  .empty {
+    color: var(--ink-soft);
+    text-align: center;
+    font-style: italic;
+    padding: 0 30px;
+  }
+
+  /* Plusje */
+  #add {
+    position: fixed;
+    left: 50%;
+    bottom: calc(28px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    border: 0;
+    background: var(--accent);
+    color: #fff;
+    font-size: 36px;
+    line-height: 1;
+    box-shadow: 0 6px 18px rgba(0,0,0,.25);
+    cursor: pointer;
+  }
+
+  /* Archiefknopje: bewust onopvallend */
+  #archiveBtn {
+    position: fixed;
+    right: 14px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    background: none;
+    border: 0;
+    font: inherit;
+    font-size: 12px;
+    color: var(--ink-soft);
+    opacity: .5;
+    padding: 8px;
+    cursor: pointer;
+  }
+
+  /* Vensters */
+  dialog {
+    border: 0;
+    border-radius: 18px;
+    background: var(--card);
+    color: var(--ink);
+    width: min(92vw, 520px);
+    padding: 20px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    font-family: inherit;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog h2 { margin: 0 0 12px; font-size: 16px; }
+  textarea {
+    width: 100%;
+    min-height: 110px;
+    font: inherit;
+    font-size: 16px; /* voorkomt inzoomen op iPhone */
+    color: var(--ink);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px;
+    resize: none;
+  }
+  .row { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .btn {
+    flex: 1;
+    min-width: 90px;
+    font: inherit;
+    font-size: 14px;
+    padding: 12px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.quiet { color: var(--ink-soft); }
+  .bigtext { font-size: 18px; line-height: 1.45; margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .meta { font-size: 12px; color: var(--ink-soft); margin: 0; }
+
+  /* Archief */
+  #archiveList { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow: auto; }
+  #archiveList li {
+    display: flex; gap: 10px; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  #archiveList li span { flex: 1; font-size: 14px; overflow-wrap: anywhere; }
+  #archiveList button {
+    font: inherit; font-size: 12px; color: var(--accent);
+    background: none; border: 0; padding: 6px; cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<main id="cloud" aria-live="polite"></main>
+
+<button id="add" aria-label="Iets in de emmer gooien">+</button>
+<button id="archiveBtn">archief</button>
+
+<!-- Nieuw item -->
+<dialog id="addDlg">
+  <h2>Wat gaat de emmer in?</h2>
+  <textarea id="addText" placeholder="Taak, belofte of idee…"></textarea>
+  <div class="row">
+    <button class="btn quiet" id="addCancel">Annuleer</button>
+    <button class="btn primary" id="addSave">Erin</button>
+  </div>
+</dialog>
+
+<!-- Item bekijken / aanpassen -->
+<dialog id="itemDlg">
+  <p class="bigtext" id="itemText"></p>
+  <p class="meta" id="itemMeta"></p>
+  <div class="row">
+    <button class="btn" id="itemUp">Belangrijker</button>
+    <button class="btn" id="itemDown">Minder belangrijk</button>
+  </div>
+  <div class="row">
+    <button class="btn primary" id="itemDone">Opgepakt / weg ermee</button>
+  </div>
+  <div class="row">
+    <button class="btn quiet" id="itemClose">Sluit</button>
+  </div>
+</dialog>
+
+<!-- Archief -->
+<dialog id="archDlg">
+  <h2>Archief</h2>
+  <ul id="archiveList"></ul>
+  <p class="meta" id="archEmpty">Niets in het archief.</p>
+  <div class="row">
+    <button class="btn quiet" id="archClose">Sluit</button>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  'use strict';
+  var KEY = 'verzamelbak.v1';
+  var items = load();
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) { return []; }
+  }
+  function save() {
+    try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {}
+  }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+  // Vaste "willekeur" per item, zodat de wolk niet bij elke render verspringt
+  function hash(s) {
+    var h = 0;
+    for (var i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+    return Math.abs(h);
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var cloud = $('cloud');
+
+  function shortLabel(text) {
+    var t = text.trim().replace(/\s+/g, ' ');
+    return t.length > 42 ? t.slice(0, 40) + '…' : t;
+  }
+
+  function render() {
+    var active = items.filter(function (i) { return !i.archived; });
+    cloud.innerHTML = '';
+
+    if (!active.length) {
+      var p = document.createElement('p');
+      p.className = 'empty';
+      p.textContent = 'De emmer is leeg. Gooi er iets in met het plusje.';
+      cloud.appendChild(p);
+    } else {
+      // Mengvolgorde is stabiel (op hash), zodat het amorf oogt maar niet verspringt
+      active.slice().sort(function (a, b) { return hash(a.id) - hash(b.id); })
+        .forEach(function (item) {
+          var h = hash(item.id);
+          var b = document.createElement('button');
+          b.className = 'word w' + item.w;
+          b.textContent = shortLabel(item.text);
+          var rot = (h % 9) - 4;                 // -4 .. +4 graden
+          var dy = ((h >> 3) % 21) - 10;         // -10 .. +10 px
+          b.style.transform = 'rotate(' + rot + 'deg) translateY(' + dy + 'px)';
+          b.addEventListener('click', function () { openItem(item.id); });
+          cloud.appendChild(b);
+        });
+    }
+    var n = items.length - active.length;
+    $('archiveBtn').textContent = n ? 'archief (' + n + ')' : 'archief';
+  }
+
+  // Nieuw item
+  var addDlg = $('addDlg'), addText = $('addText');
+  $('add').addEventListener('click', function () {
+    addText.value = '';
+    addDlg.showModal();
+    setTimeout(function () { addText.focus(); }, 50);
+  });
+  $('addCancel').addEventListener('click', function () { addDlg.close(); });
+  function addSave() {
+    var t = addText.value.trim();
+    if (!t) { addDlg.close(); return; }
+    items.push({ id: uid(), text: t, w: 3, created: Date.now(), archived: false });
+    save(); render(); addDlg.close();
+  }
+  $('addSave').addEventListener('click', addSave);
+  addText.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { addSave(); }
+  });
+
+  // Item bekijken
+  var itemDlg = $('itemDlg'), currentId = null;
+  function find(id) { return items.filter(function (i) { return i.id === id; })[0]; }
+  function openItem(id) {
+    var it = find(id); if (!it) return;
+    currentId = id;
+    $('itemText').textContent = it.text;
+    $('itemMeta').textContent = 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' });
+    itemDlg.showModal();
+  }
+  function bump(d) {
+    var it = find(currentId); if (!it) return;
+    it.w = Math.max(1, Math.min(5, it.w + d));
+    save(); render();
+  }
+  $('itemUp').addEventListener('click', function () { bump(1); });
+  $('itemDown').addEventListener('click', function () { bump(-1); });
+  $('itemDone').addEventListener('click', function () {
+    var it = find(currentId);
+    if (it) { it.archived = true; it.archivedAt = Date.now(); save(); render(); }
+    itemDlg.close();
+  });
+  $('itemClose').addEventListener('click', function () { itemDlg.close(); });
+
+  // Archief
+  var archDlg = $('archDlg');
+  function renderArchive() {
+    var list = $('archiveList');
+    list.innerHTML = '';
+    var arch = items.filter(function (i) { return i.archived; })
+      .sort(function (a, b) { return (b.archivedAt || 0) - (a.archivedAt || 0); });
+    $('archEmpty').style.display = arch.length ? 'none' : 'block';
+    arch.forEach(function (it) {
+      var li = document.createElement('li');
+      var s = document.createElement('span');
+      s.textContent = it.text;
+      var b = document.createElement('button');
+      b.textContent = 'terugzetten';
+      b.addEventListener('click', function () {
+        it.archived = false; delete it.archivedAt;
+        save(); render(); renderArchive();
+      });
+      li.appendChild(s); li.appendChild(b); list.appendChild(li);
+    });
+  }
+  $('archiveBtn').addEventListener('click', function () { renderArchive(); archDlg.showModal(); });
+  $('archClose').addEventListener('click', function () { archDlg.close(); });
+
+  // Sluiten door naast het venster te tikken
+  [addDlg, itemDlg, archDlg].forEach(function (d) {
+    d.addEventListener('click', function (e) { if (e.target === d) d.close(); });
+  });
+
+  render();
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>
