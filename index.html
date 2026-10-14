@@ -110,6 +110,22 @@
     cursor: pointer;
   }
 
+  /* Sync-status: ook onopvallend, links onderin */
+  #syncBtn {
+    position: fixed;
+    left: 14px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
+    background: none;
+    border: 0;
+    font: inherit;
+    font-size: 12px;
+    color: var(--ink-soft);
+    opacity: .5;
+    padding: 8px;
+    cursor: pointer;
+  }
+  #syncBtn.err { color: var(--accent); opacity: .95; }
+
   /* Vensters */
   dialog {
     border: 0;
@@ -172,6 +188,7 @@
 
 <button id="add" aria-label="Iets in de emmer gooien">+</button>
 <button id="archiveBtn">archief</button>
+<button id="syncBtn">inloggen</button>
 
 <!-- Nieuw item -->
 <dialog id="addDlg">
@@ -209,6 +226,20 @@
   </div>
 </dialog>
 
+<!-- Synchronisatie -->
+<dialog id="syncDlg">
+  <h2>Synchronisatie met OneDrive</h2>
+  <p class="bigtext" id="syncInfo"></p>
+  <p class="meta" id="syncErr"></p>
+  <div class="row">
+    <button class="btn primary" id="syncNow">Nu synchroniseren</button>
+    <button class="btn" id="syncOut">Uitloggen</button>
+  </div>
+  <div class="row">
+    <button class="btn quiet" id="syncClose">Sluit</button>
+  </div>
+</dialog>
+
 <script>
 (function () {
   'use strict';
@@ -216,14 +247,25 @@
   var items = load();
 
   function load() {
+    var list = [];
     try {
       var raw = localStorage.getItem(KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch (e) { return []; }
+      list = raw ? JSON.parse(raw) : [];
+    } catch (e) { list = []; }
+    // Oudere items kregen nog geen wijzigingstijd; die vullen we aan.
+    list.forEach(function (it) { if (!it.updated) it.updated = it.archivedAt || it.created || 0; });
+    return list;
   }
-  function save() {
+  // Alleen lokaal bewaren (gebruikt na een sync, om geen nieuwe sync uit te lokken)
+  function persist() {
     try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {}
   }
+  // Lokale wijziging: bewaren en laten synchroniseren
+  function save() {
+    persist();
+    scheduleSync();
+  }
+  function touch(it) { it.updated = Date.now(); }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 
   // Vaste "willekeur" per item, zodat de wolk niet bij elke render verspringt.
@@ -308,7 +350,8 @@
   function addSave() {
     var t = addText.value.trim();
     if (!t) { addDlg.close(); return; }
-    items.push({ id: uid(), text: t, w: 3, created: Date.now(), archived: false });
+    var now = Date.now();
+    items.push({ id: uid(), text: t, w: 3, created: now, updated: now, archived: false });
     save(); render(); addDlg.close();
   }
   $('addSave').addEventListener('click', addSave);
@@ -329,13 +372,14 @@
   function bump(d) {
     var it = find(currentId); if (!it) return;
     it.w = Math.max(1, Math.min(5, it.w + d));
+    touch(it);
     save(); render();
   }
   $('itemUp').addEventListener('click', function () { bump(1); });
   $('itemDown').addEventListener('click', function () { bump(-1); });
   $('itemDone').addEventListener('click', function () {
     var it = find(currentId);
-    if (it) { it.archived = true; it.archivedAt = Date.now(); save(); render(); }
+    if (it) { it.archived = true; it.archivedAt = Date.now(); touch(it); save(); render(); }
     itemDlg.close();
   });
   $('itemClose').addEventListener('click', function () { itemDlg.close(); });
@@ -356,6 +400,7 @@
       b.textContent = 'terugzetten';
       b.addEventListener('click', function () {
         it.archived = false; delete it.archivedAt;
+        touch(it);
         save(); render(); renderArchive();
       });
       li.appendChild(s); li.appendChild(b); list.appendChild(li);
@@ -369,7 +414,276 @@
     d.addEventListener('click', function (e) { if (e.target === d) d.close(); });
   });
 
+  /* =====================================================================
+     SYNC via OneDrive (Microsoft Graph)
+     Eén bestand: OneDrive\Claudemmer\verzamelbak.json
+     Werkt lokaal-eerst: de app blijft altijd bruikbaar, ook offline of
+     uitgelogd. Sync voegt alleen samen; per item wint de laatste wijziging.
+     ===================================================================== */
+  var CFG = {
+    clientId: 'fdf237c9-bf46-47fa-ab3d-a8834a73e284',
+    tenant: '984fd1fb-3d68-4c94-aff2-47f699fb5dae',
+    scope: 'https://graph.microsoft.com/Files.ReadWrite offline_access',
+    folder: 'Claudemmer',
+    file: 'verzamelbak.json'
+  };
+  var AUTHORITY = 'https://login.microsoftonline.com/' + CFG.tenant + '/oauth2/v2.0';
+  var GRAPH = 'https://graph.microsoft.com/v1.0';
+  var REDIRECT = location.origin + location.pathname.replace(/index\.html$/, '');
+  var ITEM = '/me/drive/root:/' + CFG.folder + '/' + CFG.file;
+  var TOK_KEY = 'verzamelbak.tok', PKCE_KEY = 'verzamelbak.pkce';
+
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) {
+    try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+  }
+  var tok = lsGet(TOK_KEY);            // { access, refresh, exp }
+  var lastOk = null, lastError = '', state = 'idle';
+
+  /* ---------- inloggen (PKCE, zonder extra bibliotheken) ---------- */
+  function b64url(buf) {
+    var b = new Uint8Array(buf), s = '';
+    for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function randStr(n) { var a = new Uint8Array(n); crypto.getRandomValues(a); return b64url(a); }
+
+  function login() {
+    var verifier = randStr(48), st = randStr(16);
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)).then(function (h) {
+      lsSet(PKCE_KEY, { v: verifier, s: st });
+      var q = new URLSearchParams({
+        client_id: CFG.clientId, response_type: 'code', redirect_uri: REDIRECT,
+        response_mode: 'query', scope: CFG.scope, state: st,
+        code_challenge: b64url(h), code_challenge_method: 'S256',
+        domain_hint: 'organizations'
+      });
+      location.href = AUTHORITY + '/authorize?' + q.toString();
+    });
+  }
+
+  function tokenRequest(params) {
+    return fetch(AUTHORITY + '/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString()
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) {
+          var e = new Error(j.error_description || j.error || 'Inloggen mislukt');
+          e.code = j.error; e.status = r.status; throw e;
+        }
+        tok = {
+          access: j.access_token,
+          refresh: j.refresh_token || (tok && tok.refresh),
+          exp: Date.now() + (j.expires_in || 3600) * 1000
+        };
+        lsSet(TOK_KEY, tok);
+        return tok;
+      });
+    });
+  }
+
+  // Terugkeer van de Microsoft-inlogpagina: ?code=...&state=...
+  function handleRedirect() {
+    var p = new URLSearchParams(location.search);
+    if (!p.has('code') && !p.has('error')) return Promise.resolve();
+    var saved = lsGet(PKCE_KEY);
+    lsSet(PKCE_KEY, null);
+    var code = p.get('code'), st = p.get('state'), err = p.get('error_description') || p.get('error');
+    history.replaceState(null, '', REDIRECT);
+    if (err) { lastError = err; return Promise.resolve(); }
+    if (!saved || saved.s !== st) { lastError = 'Inlogcontrole mislukt, probeer opnieuw'; return Promise.resolve(); }
+    return tokenRequest({
+      grant_type: 'authorization_code', client_id: CFG.clientId, code: code,
+      redirect_uri: REDIRECT, code_verifier: saved.v, scope: CFG.scope
+    }).then(null, function (e) { lastError = e.message; });
+  }
+
+  function authError() { var e = new Error('Opnieuw inloggen nodig'); e.auth = true; return e; }
+
+  function getToken() {
+    if (tok && tok.access && tok.exp > Date.now() + 60000) return Promise.resolve(tok.access);
+    if (tok && tok.refresh) {
+      return tokenRequest({
+        grant_type: 'refresh_token', client_id: CFG.clientId,
+        refresh_token: tok.refresh, scope: CFG.scope
+      }).then(function (t) { return t.access; }, function (e) {
+        if (e.status === 400 || e.status === 401) { tok = null; lsSet(TOK_KEY, null); throw authError(); }
+        throw e;
+      });
+    }
+    return Promise.reject(authError());
+  }
+
+  /* ---------- OneDrive lezen en schrijven ---------- */
+  function httpErr(r) { var e = new Error('OneDrive gaf fout ' + r.status); e.status = r.status; return e; }
+
+  function gfetch(path, opts) {
+    return getToken().then(function (t) {
+      opts = opts || {};
+      opts.headers = Object.assign({ Authorization: 'Bearer ' + t }, opts.headers || {});
+      return fetch(GRAPH + path, opts);
+    });
+  }
+
+  function parseRemote(txt) {
+    if (!txt.trim()) return [];
+    var j = JSON.parse(txt);
+    return Array.isArray(j) ? j : (j.items || []);
+  }
+
+  // Geeft null terug als het bestand nog niet bestaat
+  function getRemote() {
+    return gfetch(ITEM).then(function (r) {
+      if (r.status === 404) return null;
+      if (!r.ok) throw httpErr(r);
+      return r.json().then(function (meta) {
+        var url = meta['@microsoft.graph.downloadUrl'];
+        if (!url) throw new Error('Geen downloadlink van OneDrive');
+        return fetch(url).then(function (d) {
+          if (!d.ok) throw httpErr(d);
+          return d.text();
+        }).then(function (txt) { return { etag: meta.eTag, items: parseRemote(txt) }; });
+      });
+    });
+  }
+
+  function ensureFolder() {
+    return gfetch('/me/drive/root/children', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: CFG.folder, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+    }).then(function (r) {
+      if (!r.ok && r.status !== 409) throw httpErr(r);   // 409 = map bestaat al, prima
+    });
+  }
+
+  function putRemote(list, etag) {
+    var body = JSON.stringify({ version: 1, saved: new Date().toISOString(), items: list }, null, 1);
+    function put() {
+      var headers = { 'Content-Type': 'application/json' };
+      var url = ITEM + ':/content';
+      if (etag) headers['If-Match'] = etag;                         // alleen overschrijven als niemand ons voor was
+      else url += '?@microsoft.graph.conflictBehavior=fail';        // bestand is nieuw: niet over een ander heen schrijven
+      return gfetch(url, { method: 'PUT', headers: headers, body: body });
+    }
+    return put().then(function (r) {
+      if (r.status === 404) return ensureFolder().then(put);
+      return r;
+    }).then(function (r) {
+      if (r.status === 412 || r.status === 409) { var e = new Error('conflict'); e.conflict = true; throw e; }
+      if (!r.ok) throw httpErr(r);
+    });
+  }
+
+  /* ---------- samenvoegen: per item wint de laatste wijziging ---------- */
+  function stamp(it) { return it.updated || it.archivedAt || it.created || 0; }
+
+  function mergeLists(a, b) {
+    var map = {};
+    a.concat(b).forEach(function (it) {
+      if (!it || !it.id) return;
+      var cur = map[it.id];
+      if (!cur || stamp(it) > stamp(cur)) map[it.id] = it;
+    });
+    return Object.keys(map).map(function (k) {
+      var it = map[k];
+      if (!it.updated) it.updated = stamp(it);
+      return it;
+    });
+  }
+
+  // Vaste volgorde en vaste sleutelvolgorde, zodat gelijke lijsten ook gelijk uitkomen
+  function stable(list) {
+    return JSON.stringify(list.slice().sort(function (x, y) { return x.id < y.id ? -1 : 1; }).map(function (it) {
+      var o = {}; Object.keys(it).sort().forEach(function (k) { o[k] = it[k]; }); return o;
+    }));
+  }
+
+  /* ---------- de sync zelf ---------- */
+  var syncing = false, again = false, syncTimer = null;
+
+  function attempt(n) {
+    return getRemote().then(function (remote) {
+      var remoteItems = remote ? remote.items : [];
+      items = mergeLists(items, remoteItems);   // lokaal en OneDrive samen
+      persist(); render();
+      if (remote && stable(items) === stable(remoteItems.map(function (it) { if (!it.updated) it.updated = stamp(it); return it; }))) return;
+      return putRemote(items, remote && remote.etag).then(null, function (e) {
+        if (e.conflict && n < 3) return attempt(n + 1);   // ander toestel was ons voor: opnieuw ophalen en samenvoegen
+        throw e;
+      });
+    });
+  }
+
+  function sync() {
+    if (!tok) { setStatus('off'); return Promise.resolve(); }
+    if (!navigator.onLine) { setStatus('offline'); return Promise.resolve(); }
+    if (syncing) { again = true; return Promise.resolve(); }
+    syncing = true; setStatus('busy');
+    return attempt(0).then(function () {
+      lastOk = Date.now(); lastError = ''; setStatus('ok');
+    }, function (e) {
+      if (e.auth) { setStatus('off'); lastError = e.message; }
+      else if (e instanceof TypeError || !navigator.onLine) { setStatus('offline'); }
+      else { lastError = e.message; setStatus('err'); }
+    }).then(function () {
+      syncing = false;
+      if (again) { again = false; scheduleSync(); }
+    });
+  }
+
+  function scheduleSync() {
+    if (!tok) return;
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(sync, 1200);   // even wachten, zodat meerdere wijzigingen in één keer gaan
+  }
+
+  /* ---------- statusknopje en venster ---------- */
+  var syncBtn = $('syncBtn'), syncDlg = $('syncDlg');
+  function hhmm(t) { return new Date(t).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }); }
+  function setStatus(s) {
+    state = s;
+    var labels = {
+      off: 'inloggen', idle: '', busy: 'sync…', offline: 'offline', err: 'sync-fout',
+      ok: lastOk ? 'gesynct ' + hhmm(lastOk) : 'gesynct'
+    };
+    syncBtn.textContent = labels[s];
+    syncBtn.className = (s === 'err' || (s === 'off' && lastError)) ? 'err' : '';
+  }
+
+  syncBtn.addEventListener('click', function () {
+    if (!tok) { login(); return; }
+    var info = {
+      idle: 'Bezig met verbinden…', busy: 'Bezig met synchroniseren…', offline: 'Geen verbinding. Wijzigingen blijven lokaal bewaard en gaan mee zodra je weer online bent.',
+      err: 'Synchroniseren is mislukt.', ok: 'Gesynct met OneDrive\\Claudemmer\\verzamelbak.json' + (lastOk ? ' om ' + hhmm(lastOk) : '') + '.',
+      off: 'Niet ingelogd.'
+    };
+    $('syncInfo').textContent = info[state] || '';
+    $('syncErr').textContent = lastError;
+    syncDlg.showModal();
+  });
+  $('syncNow').addEventListener('click', function () { syncDlg.close(); sync(); });
+  $('syncOut').addEventListener('click', function () {
+    tok = null; lsSet(TOK_KEY, null); lastOk = null; lastError = '';
+    setStatus('off'); syncDlg.close();
+  });
+  $('syncClose').addEventListener('click', function () { syncDlg.close(); });
+  syncDlg.addEventListener('click', function (e) { if (e.target === syncDlg) syncDlg.close(); });
+
+  // Wanneer synchroniseren: bij openen, bij terugkeer naar de app, bij weer online, en elke minuut
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) sync(); });
+  window.addEventListener('online', sync);
+  setInterval(function () { if (!document.hidden) sync(); }, 60000);
+
   render();
+  setStatus(tok ? 'idle' : 'off');
+  handleRedirect().then(function () {
+    setStatus(tok ? 'idle' : 'off');
+    if (lastError) { syncBtn.className = 'err'; }
+    return sync();
+  });
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(function () {});

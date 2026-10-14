@@ -1,7 +1,9 @@
 // Service worker: houdt de app beschikbaar zonder internet.
 // Netwerk eerst: je krijgt altijd de nieuwste versie als je online bent,
 // en de laatst bewaarde versie als je offline bent.
-var VERSION = 'verzamelbak-v2';
+// Belangrijk: alleen bestanden van de app zelf. Alles van Microsoft (inloggen en
+// OneDrive) gaat rechtstreeks naar het netwerk en wordt nooit bewaard.
+var VERSION = 'verzamelbak-v3';
 var FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
@@ -20,12 +22,21 @@ self.addEventListener('activate', function (e) {
 });
 
 self.addEventListener('fetch', function (e) {
-  if (e.request.method !== 'GET') return;
+  var req = e.request;
+  if (req.method !== 'GET') return;
+  var url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;   // Microsoft e.d.: niet aanraken
+
   e.respondWith(
-    fetch(e.request).then(function (res) {
-      var copy = res.clone();
-      caches.open(VERSION).then(function (c) { c.put(e.request, copy); });
+    fetch(req).then(function (res) {
+      // Alleen bewaren zonder zoekopdracht in het adres (dus niet de terugkeer van het inloggen)
+      if (res.ok && !url.search) {
+        var copy = res.clone();
+        caches.open(VERSION).then(function (c) { c.put(req, copy); });
+      }
       return res;
-    }).catch(function () { return caches.match(e.request); })
+    }).catch(function () {
+      return caches.match(req, { ignoreSearch: true });
+    })
   );
 });
