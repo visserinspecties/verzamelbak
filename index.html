@@ -20,10 +20,14 @@
     --accent: #b5482a;
     --line: #ddd4c4;
     --word-l: 36%;   /* helderheid van de woordkleuren */
+    --hl: rgba(255, 230, 0, .8);    /* markeerstift */
+    --hl-ico: #9a7600;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --word-l: 68%;
+      --hl: rgba(204, 168, 20, .5);
+      --hl-ico: #e6c230;
       --bg: #1d1b18;
       --ink: #efe8da;
       --ink-soft: #8d8576;
@@ -83,6 +87,21 @@
     opacity: .9;
   }
   .word .due.now { color: var(--accent); }
+
+  /* Markeerstift: slordige gele streep achter het woord. Alles in em, dus hij groeit en krimpt mee met het woord. */
+  .word { position: relative; isolation: isolate; }
+  .word.hl .lbl { position: relative; }
+  .word.hl .lbl::before {
+    content: '';
+    position: absolute; z-index: -1;
+    left: -.28em; right: -.28em; top: .06em; bottom: -.04em;
+    background: var(--hl);
+    transform: rotate(var(--hr, 0deg));
+    clip-path: polygon(
+      0 var(--t1), 34% var(--t2), 68% var(--t3), 100% var(--t4),
+      100% var(--b4), 66% var(--b3), 31% var(--b2), 0 var(--b1));
+  }
+  .ico.on { opacity: 1; color: var(--hl-ico); }
 
   /* Iconen in het item-venster: klein en rustig, maar met een groot tikvlak */
   dialog { position: fixed; }
@@ -252,6 +271,9 @@
 <!-- Item bekijken / aanpassen -->
 <dialog id="itemDlg">
   <div class="icons" id="itemIcons">
+    <button class="ico" id="itemHl" aria-label="Markeren">
+      <svg viewBox="0 0 24 24"><path d="M14.5 4l5.5 5.5-8.5 8.5-5.5-5.5z"/><path d="M6 12.5L4.5 18l5.5-1.5"/><path d="M13 21h8"/></svg>
+    </button>
     <button class="ico" id="itemEdit" aria-label="Bewerken">
       <svg viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 0l0 0a2 2 0 0 1 0 3L8 19z"/><path d="M14.5 6.5l3 3"/></svg>
     </button>
@@ -270,10 +292,10 @@
       <button class="btn" id="itemDown">Minder belangrijk</button>
     </div>
     <div class="row">
-      <button class="btn primary" id="itemDone">Opgepakt / weg ermee</button>
+      <button class="btn quiet" id="itemDone">Opgepakt / weg ermee</button>
     </div>
     <div class="row">
-      <button class="btn quiet" id="itemClose">Sluit</button>
+      <button class="btn primary" id="itemClose">Sluit</button>
     </div>
   </div>
   <div class="row" id="editRows" style="display:none">
@@ -394,6 +416,16 @@
           var lbl = document.createElement('span');
           lbl.className = 'lbl';
           lbl.textContent = shortLabel(item.text);
+          if (item.hl) {
+            // Per item een eigen, vaste "slordige" vorm
+            b.classList.add('hl');
+            var pc = function (k, lo, hi) { return (lo + rnd(id, k) * (hi - lo)).toFixed(0) + '%'; };
+            lbl.style.setProperty('--t1', pc('t1', 0, 16)); lbl.style.setProperty('--t2', pc('t2', 0, 16));
+            lbl.style.setProperty('--t3', pc('t3', 0, 16)); lbl.style.setProperty('--t4', pc('t4', 0, 16));
+            lbl.style.setProperty('--b1', pc('b1', 84, 100)); lbl.style.setProperty('--b2', pc('b2', 84, 100));
+            lbl.style.setProperty('--b3', pc('b3', 84, 100)); lbl.style.setProperty('--b4', pc('b4', 84, 100));
+            lbl.style.setProperty('--hr', ((rnd(id, 'hr') - 0.5) * 3).toFixed(1) + 'deg');
+          }
           b.appendChild(lbl);
           var di = dueInfo(item.due);
           if (di) {
@@ -475,7 +507,14 @@
     line.className = 'dueline' + (di && di.now ? ' now' : '');
     $('itemDueTxt').textContent = di ? 'Deadline ' + di.text : '';
     $('itemDue').value = it.due || '';
+    $('itemHl').className = 'ico' + (it.hl ? ' on' : '');
   }
+  // Markeren aan/uit
+  $('itemHl').addEventListener('click', function () {
+    var it = find(currentId); if (!it) return;
+    if (it.hl) delete it.hl; else it.hl = true;
+    touch(it); save(); render(); showItem(it);
+  });
   // Bewerken: de tekst wordt een invulvak; de rest van de knoppen maakt even plaats
   function setEditMode(on) {
     $('itemText').style.display = on ? 'none' : '';

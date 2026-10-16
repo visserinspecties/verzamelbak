@@ -3,7 +3,7 @@
 // en de laatst bewaarde versie als je offline bent.
 // Belangrijk: alleen bestanden van de app zelf. Alles van Microsoft (inloggen en
 // OneDrive) gaat rechtstreeks naar het netwerk en wordt nooit bewaard.
-var VERSION = 'verzamelbak-v4';
+var VERSION = 'verzamelbak-v5';
 var FILES = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', function (e) {
