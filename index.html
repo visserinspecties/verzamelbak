@@ -71,6 +71,43 @@
   .w4 { font-size: 36px; font-weight: 700; }
   .w5 { font-size: 46px; font-weight: 700; }
 
+  /* Deadline: heel klein onder het woord */
+  .word .lbl { display: block; }
+  .word .due {
+    display: block;
+    font-size: 10px;
+    font-weight: 400;
+    line-height: 1.2;
+    margin-top: 1px;
+    color: var(--ink-soft);
+    opacity: .9;
+  }
+  .word .due.now { color: var(--accent); }
+
+  /* Iconen in het item-venster: klein en rustig, maar met een groot tikvlak */
+  dialog { position: fixed; }
+  .icons { position: absolute; top: 6px; right: 6px; display: flex; }
+  .ico {
+    position: relative;
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: 0; padding: 0;
+    color: var(--ink-soft); opacity: .6; cursor: pointer;
+  }
+  .ico svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  /* Het datumveld ligt onzichtbaar over het icoon: tikken opent direct de datumkiezer van de telefoon */
+  .ico input[type=date] {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    opacity: 0; border: 0; padding: 0; margin: 0; font-size: 16px; cursor: pointer;
+  }
+  #itemDlg { position: fixed; padding-top: 28px; }
+  .dueline { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; color: var(--ink-soft); min-height: 24px; }
+  .dueline.now { color: var(--accent); }
+  .dueline button { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 10px; margin: -10px 0; cursor: pointer; text-decoration: underline; }
+  .addrow { display: flex; align-items: center; margin-top: 4px; }
+  .addrow .ico { width: 44px; height: 44px; margin-left: -10px; }
+  #editText { margin-top: 2px; }
+
   .empty {
     color: var(--ink-soft);
     text-align: center;
@@ -96,32 +133,37 @@
   }
 
   /* Archiefknopje: bewust onopvallend */
+  /* Tekst blijft klein; het tikvlak is minstens 56 x 56 px (grote vingers, kleine telefoon) */
   #archiveBtn {
     position: fixed;
-    right: 14px;
-    bottom: calc(14px + env(safe-area-inset-bottom));
+    right: 0;
+    bottom: env(safe-area-inset-bottom);
+    min-width: 56px; min-height: 56px;
+    display: flex; align-items: center; justify-content: flex-end;
     background: none;
     border: 0;
     font: inherit;
     font-size: 12px;
     color: var(--ink-soft);
     opacity: .5;
-    padding: 8px;
+    padding: 0 18px;
     cursor: pointer;
   }
 
   /* Sync-status: ook onopvallend, links onderin */
   #syncBtn {
     position: fixed;
-    left: 14px;
-    bottom: calc(14px + env(safe-area-inset-bottom));
+    left: 0;
+    bottom: env(safe-area-inset-bottom);
+    min-width: 56px; min-height: 56px;
+    display: flex; align-items: center; justify-content: flex-start;
     background: none;
     border: 0;
     font: inherit;
     font-size: 12px;
     color: var(--ink-soft);
     opacity: .5;
-    padding: 8px;
+    padding: 0 18px;
     cursor: pointer;
   }
   #syncBtn.err { color: var(--accent); opacity: .95; }
@@ -194,6 +236,13 @@
 <dialog id="addDlg">
   <h2>Wat gaat de emmer in?</h2>
   <textarea id="addText" placeholder="Taak, belofte of idee… (de eerste regel is het onderwerp; in de wolk zie je maximaal twee woorden)"></textarea>
+  <div class="addrow">
+    <span class="ico" aria-label="Deadline kiezen">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <input type="date" id="addDue" aria-label="Deadline">
+    </span>
+    <span class="meta" id="addDueTxt"></span>
+  </div>
   <div class="row">
     <button class="btn quiet" id="addCancel">Annuleer</button>
     <button class="btn primary" id="addSave">Erin</button>
@@ -202,17 +251,34 @@
 
 <!-- Item bekijken / aanpassen -->
 <dialog id="itemDlg">
+  <div class="icons" id="itemIcons">
+    <button class="ico" id="itemEdit" aria-label="Bewerken">
+      <svg viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 0l0 0a2 2 0 0 1 0 3L8 19z"/><path d="M14.5 6.5l3 3"/></svg>
+    </button>
+    <span class="ico" aria-label="Deadline kiezen">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <input type="date" id="itemDue" aria-label="Deadline">
+    </span>
+  </div>
   <p class="bigtext" id="itemText"></p>
+  <textarea id="editText" style="display:none"></textarea>
   <p class="meta" id="itemMeta"></p>
-  <div class="row">
-    <button class="btn" id="itemUp">Belangrijker</button>
-    <button class="btn" id="itemDown">Minder belangrijk</button>
+  <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button></div>
+  <div id="viewRows">
+    <div class="row">
+      <button class="btn" id="itemUp">Belangrijker</button>
+      <button class="btn" id="itemDown">Minder belangrijk</button>
+    </div>
+    <div class="row">
+      <button class="btn primary" id="itemDone">Opgepakt / weg ermee</button>
+    </div>
+    <div class="row">
+      <button class="btn quiet" id="itemClose">Sluit</button>
+    </div>
   </div>
-  <div class="row">
-    <button class="btn primary" id="itemDone">Opgepakt / weg ermee</button>
-  </div>
-  <div class="row">
-    <button class="btn quiet" id="itemClose">Sluit</button>
+  <div class="row" id="editRows" style="display:none">
+    <button class="btn quiet" id="editCancel">Annuleer</button>
+    <button class="btn primary" id="editSave">Bewaar</button>
   </div>
 </dialog>
 
@@ -296,6 +362,19 @@
     return label.length > 28 ? label.slice(0, 26) + '…' : label;
   }
 
+  // Deadline ('JJJJ-MM-DD') netjes tonen, bv. "24 okt". Geeft ook aan of het vandaag of al voorbij is.
+  function parseDue(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
+    return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+  }
+  function dueInfo(s) {
+    var d = parseDue(s); if (!d) return null;
+    var t = new Date(); t.setHours(0, 0, 0, 0);
+    var opts = { day: 'numeric', month: 'short' };
+    if (d.getFullYear() !== t.getFullYear()) opts.year = 'numeric';
+    return { text: d.toLocaleDateString('nl-NL', opts).replace('.', ''), now: d <= t };
+  }
+
   function render() {
     var active = items.filter(function (i) { return !i.archived; });
     cloud.innerHTML = '';
@@ -312,7 +391,17 @@
           var id = item.id;
           var b = document.createElement('button');
           b.className = 'word w' + item.w;
-          b.textContent = shortLabel(item.text);
+          var lbl = document.createElement('span');
+          lbl.className = 'lbl';
+          lbl.textContent = shortLabel(item.text);
+          b.appendChild(lbl);
+          var di = dueInfo(item.due);
+          if (di) {
+            var ds = document.createElement('span');
+            ds.className = 'due' + (di.now ? ' now' : '');
+            ds.textContent = di.text;
+            b.appendChild(ds);
+          }
 
           // Kleur
           b.style.setProperty('--hue', HUES[Math.floor(rnd(id, 'hue') * HUES.length)]);
@@ -341,8 +430,15 @@
 
   // Nieuw item
   var addDlg = $('addDlg'), addText = $('addText');
+  var addDue = $('addDue');
+  function showAddDue() {
+    var di = dueInfo(addDue.value);
+    $('addDueTxt').textContent = di ? 'Deadline ' + di.text : '';
+  }
+  addDue.addEventListener('change', showAddDue);
   $('add').addEventListener('click', function () {
     addText.value = '';
+    addDue.value = ''; showAddDue();
     addDlg.showModal();
     setTimeout(function () { addText.focus(); }, 50);
   });
@@ -351,7 +447,9 @@
     var t = addText.value.trim();
     if (!t) { addDlg.close(); return; }
     var now = Date.now();
-    items.push({ id: uid(), text: t, w: 3, created: now, updated: now, archived: false });
+    var nieuw = { id: uid(), text: t, w: 3, created: now, updated: now, archived: false };
+    if (parseDue(addDue.value)) nieuw.due = addDue.value;
+    items.push(nieuw);
     save(); render(); addDlg.close();
   }
   $('addSave').addEventListener('click', addSave);
@@ -365,10 +463,52 @@
   function openItem(id) {
     var it = find(id); if (!it) return;
     currentId = id;
-    $('itemText').textContent = it.text;
-    $('itemMeta').textContent = 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' });
+    setEditMode(false);
+    showItem(it);
     itemDlg.showModal();
   }
+  function showItem(it) {
+    $('itemText').textContent = it.text;
+    $('itemMeta').textContent = 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' });
+    var di = dueInfo(it.due), line = $('itemDueLine');
+    line.style.display = di ? 'flex' : 'none';
+    line.className = 'dueline' + (di && di.now ? ' now' : '');
+    $('itemDueTxt').textContent = di ? 'Deadline ' + di.text : '';
+    $('itemDue').value = it.due || '';
+  }
+  // Bewerken: de tekst wordt een invulvak; de rest van de knoppen maakt even plaats
+  function setEditMode(on) {
+    $('itemText').style.display = on ? 'none' : '';
+    $('editText').style.display = on ? '' : 'none';
+    $('viewRows').style.display = on ? 'none' : '';
+    $('editRows').style.display = on ? 'flex' : 'none';
+    $('itemIcons').style.display = on ? 'none' : '';
+  }
+  $('itemEdit').addEventListener('click', function () {
+    var it = find(currentId); if (!it) return;
+    $('editText').value = it.text;
+    setEditMode(true);
+    $('editText').focus();
+  });
+  $('editCancel').addEventListener('click', function () { setEditMode(false); });
+  $('editSave').addEventListener('click', function () {
+    var it = find(currentId); if (!it) return;
+    var t = $('editText').value.trim();
+    if (!t) { setEditMode(false); return; }   // leeg bewaren doen we niet: de oude tekst blijft
+    if (t !== it.text) { it.text = t; touch(it); save(); render(); }
+    showItem(it); setEditMode(false);
+  });
+  // Deadline kiezen of wissen
+  $('itemDue').addEventListener('change', function () {
+    var it = find(currentId); if (!it) return;
+    var v = $('itemDue').value;
+    if (parseDue(v)) it.due = v; else delete it.due;
+    touch(it); save(); render(); showItem(it);
+  });
+  $('itemDueClear').addEventListener('click', function () {
+    var it = find(currentId); if (!it) return;
+    delete it.due; touch(it); save(); render(); showItem(it);
+  });
   function bump(d) {
     var it = find(currentId); if (!it) return;
     it.w = Math.max(1, Math.min(5, it.w + d));
