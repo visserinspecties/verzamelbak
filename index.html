@@ -228,6 +228,12 @@
   .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .btn.quiet { color: var(--ink-soft); }
   .bigtext { font-size: 18px; line-height: 1.45; margin: 0 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* afvinken per regel: tik op een regel en hij wordt doorgestreept */
+  .bigtext .ln { display: block; cursor: pointer; border-radius: 6px; margin: 0 -4px; padding: 0 4px; -webkit-tap-highlight-color: transparent; }
+  .bigtext .ln:hover { background: rgba(128,128,128,.10); }
+  .bigtext .ln.empty { cursor: default; background: none; }
+  .ln.done { text-decoration: line-through; opacity: .5; }
+  #archiveList .ln { display: block; }
   .meta { font-size: 12px; color: var(--ink-soft); margin: 0; }
 
   /* Archief */
@@ -379,7 +385,7 @@
   // Onderwerp in de wolk: maximaal twee woorden.
   // Staat er een eerste regel, dan geldt die als onderwerp; anders de eerste twee woorden.
   function shortLabel(text) {
-    var first = text.trim().split(/\n/)[0].trim();
+    var first = text.trim().split(/\n/)[0].trim().replace(/^✓ /, '');
     var words = first.split(/\s+/).filter(Boolean);
     var label = words.slice(0, 2).join(' ');
     return label.length > 28 ? label.slice(0, 26) + '…' : label;
@@ -500,9 +506,33 @@
     showItem(it);
     itemDlg.showModal();
   }
+  // Een afgevinkte regel begint met "✓ "; zo blijft het gewone tekst en synchroniseert het gewoon mee.
+  var DONE = '✓ ';
+  function isDone(l) { return l.indexOf(DONE) === 0; }
+  function fillLines(el, text, clickable) {
+    el.innerHTML = '';
+    text.split('\n').forEach(function (l, i) {
+      var s = document.createElement('span');
+      s.className = 'ln';
+      if (!l.trim()) { s.className += ' empty'; s.textContent = '\u200b'; }
+      else {
+        if (isDone(l)) { s.className += ' done'; s.textContent = l.slice(DONE.length); } else s.textContent = l;
+        if (clickable) { s.setAttribute('data-i', i); s.title = isDone(l) ? 'Tik om terug te zetten' : 'Tik om af te vinken'; }
+      }
+      el.appendChild(s);
+    });
+  }
+  $('itemText').addEventListener('click', function (e) {
+    var s = e.target.closest && e.target.closest('.ln[data-i]'); if (!s) return;
+    var it = find(currentId); if (!it) return;
+    var lines = it.text.split('\n'), i = +s.getAttribute('data-i');
+    if (lines[i] === undefined) return;
+    lines[i] = isDone(lines[i]) ? lines[i].slice(DONE.length) : DONE + lines[i];
+    it.text = lines.join('\n'); touch(it); save(); render(); showItem(it);
+  });
   function showItem(it) {
-    $('itemText').textContent = it.text;
-    $('itemMeta').textContent = 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' });
+    fillLines($('itemText'), it.text, true);
+    $('itemMeta').textContent = 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) + (it.text.indexOf('\n') > -1 ? ' · tik op een regel om af te vinken' : '');
     var di = dueInfo(it.due), line = $('itemDueLine');
     line.style.display = di ? 'flex' : 'none';
     line.className = 'dueline' + (di && di.now ? ' now' : '');
@@ -575,7 +605,7 @@
     arch.forEach(function (it) {
       var li = document.createElement('li');
       var s = document.createElement('span');
-      s.textContent = it.text;
+      var tx = document.createElement('span'); fillLines(tx, it.text, false); s.appendChild(tx);
       var ts = it.archivedAt || it.updated;
       if (ts) {
         var dd = document.createElement('small');
