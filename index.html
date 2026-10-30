@@ -292,6 +292,7 @@
   <p class="bigtext" id="itemText"></p>
   <textarea id="editText" style="display:none"></textarea>
   <p class="meta" id="itemMeta"></p>
+  <p class="meta"><a id="itemLink" target="_blank" rel="noopener" style="display:none;color:inherit"></a></p>
   <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button></div>
   <div id="viewRows">
     <div class="row">
@@ -532,7 +533,10 @@
   });
   function showItem(it) {
     fillLines($('itemText'), it.text, true);
-    $('itemMeta').textContent = 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) + (it.text.indexOf('\n') > -1 ? ' · tik op een regel om af te vinken' : '');
+    var lnk = $('itemLink');
+    if (it.link) { lnk.href = it.link; lnk.textContent = it.bron === 'mail' ? '↗ Mail openen in Outlook' : '↗ Openen'; lnk.style.display = 'inline'; }
+    else lnk.style.display = 'none';
+    $('itemMeta').textContent = (it.bron === 'mail' ? 'Doorgestuurde mail · ' : it.bron === 'deelknop' ? 'Via de deelknop · ' : '') + 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) + (it.text.indexOf('\n') > -1 ? ' · tik op een regel om af te vinken' : '');
     var di = dueInfo(it.due), line = $('itemDueLine');
     line.style.display = di ? 'flex' : 'none';
     line.className = 'dueline' + (di && di.now ? ' now' : '');
@@ -818,6 +822,142 @@
     }));
   }
 
+
+  /* ---------- brievenbus: deelknop/Siri (OneDrive › Claudemmer › Inbox) en doorgestuurde mail ----------
+     - De iPhone-opdracht "In de emmer" bewaart tekst als bestand in Claudemmer/Inbox.
+       Bij elke sync wordt elk bestand een item; tekstbestanden gaan daarna weg,
+       andere bestanden (foto, PDF) verhuizen naar Claudemmer/Bijlagen en het item linkt ernaartoe.
+     - Mail die naar EMMER_ADRES gaat (plus-adres: komt gewoon in je eigen inbox) wordt ook een item;
+       de mail verhuist daarna naar de Outlook-map "Emmer".
+     Item-id's zijn vast per bestand/mail, dus dubbel verwerken levert nooit dubbele items op. */
+  var INBOX = CFG.folder + '/Inbox', BIJLAGEN = 'Bijlagen';
+  var EMMER_ADRES = 'info+emmer@visserinspecties.nl', MAILMAP = 'Emmer';
+  var TEKST_EXT = /\.(txt|md|text|url|webloc|json)$/i;
+  var opruimen = [];                      // na een geslaagde sync: bestanden/mails wegzetten
+
+  function encPad(p) { return p.split('/').map(encodeURIComponent).join('/'); }
+  function heeftItem(id) { return items.some(function (i) { return i.id === id; }); }
+  function nieuwItem(id, tekst, extra) {
+    if (heeftItem(id)) return false;
+    var now = Date.now();
+    var it = { id: id, text: tekst, w: 3, created: now, updated: now, archived: false };
+    Object.keys(extra || {}).forEach(function (k) { if (extra[k]) it[k] = extra[k]; });
+    items.push(it); return true;
+  }
+  function schoonTekst(t, naam) {
+    t = String(t || '').replace(/\r/g, '').trim();
+    var url = t.match(/^\s*\[InternetShortcut\][\s\S]*?^URL=(.+)$/m);   // .url-bestand
+    if (url) t = url[1].trim();
+    if (!t) t = naam.replace(TEKST_EXT, '');
+    return t.slice(0, 4000);
+  }
+
+  // mailtoken apart ophalen; lukt het niet (geen toestemming), dan slaan we mail gewoon over
+  function mailToken() {
+    if (!tok || !tok.refresh) return Promise.resolve(null);
+    return fetch(AUTHORITY + '/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: CFG.clientId, refresh_token: tok.refresh,
+        scope: 'https://graph.microsoft.com/Mail.ReadWrite offline_access' }).toString()
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.access_token) return null;
+      if (j.refresh_token) { tok.refresh = j.refresh_token; lsSet(TOK_KEY, tok); }
+      return j.access_token;
+    }, function () { return null; });
+  }
+
+  function haalBestanden() {
+    return gfetch('/me/drive/root:/' + encPad(INBOX) + ':/children?$top=100').then(function (r) {
+      if (r.status === 404) return [];
+      if (!r.ok) return [];
+      return r.json().then(function (j) { return (j.value || []).filter(function (x) { return x.file; }); });
+    }).then(function (lijst) {
+      return lijst.reduce(function (p, f) {
+        return p.then(function () {
+          var id = 'inbox-' + f.id;
+          var tekst = TEKST_EXT.test(f.name) || /^text\//.test((f.file || {}).mimeType || '') || !/\.[a-z0-9]{2,5}$/i.test(f.name);
+          if (heeftItem(id)) { opruimen.push({ soort: 'bestand', f: f, tekst: tekst }); return; }   // al verwerkt, alleen nog opruimen
+          if (!tekst) {
+            nieuwItem(id, '📎 ' + f.name, { bron: 'deelknop', link: f.webUrl });
+            opruimen.push({ soort: 'bestand', f: f, tekst: false });
+            return;
+          }
+          var url = f['@microsoft.graph.downloadUrl'];
+          return (url ? fetch(url).then(function (d) { return d.text(); }) : Promise.resolve('')).then(function (t) {
+            nieuwItem(id, schoonTekst(t, f.name), { bron: 'deelknop' });
+            opruimen.push({ soort: 'bestand', f: f, tekst: true });
+          });
+        });
+      }, Promise.resolve());
+    }).then(null, function () {});       // brievenbus mag de gewone sync nooit blokkeren
+  }
+
+  function haalMail() {
+    return mailToken().then(function (mt) {
+      if (!mt) return;
+      var H = { Authorization: 'Bearer ' + mt };
+      var url = GRAPH + '/me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc' +
+        '&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,webLink,receivedDateTime';
+      return fetch(url, { headers: H }).then(function (r) { return r.ok ? r.json() : { value: [] }; }).then(function (j) {
+        (j.value || []).forEach(function (m) {
+          var aan = (m.toRecipients || []).concat(m.ccRecipients || []).map(function (x) {
+            return ((x.emailAddress || {}).address || '').toLowerCase(); });
+          if (aan.indexOf(EMMER_ADRES) < 0) return;
+          var id = 'mail-' + m.id.slice(-24);
+          var onderwerp = (m.subject || '(geen onderwerp)').replace(/^\s*((fw|fwd|doorst|tr|wg)\s*:\s*)+/i, '').trim();
+          var notitie = (m.bodyPreview || '').split(/\r?\n/)[0].trim();
+          if (/^(van|from)\s*:/i.test(notitie)) notitie = '';          // geen eigen toelichting toegevoegd
+          nieuwItem(id, onderwerp + (notitie ? '\n' + notitie.slice(0, 300) : ''),
+            { bron: 'mail', link: m.webLink, created: Date.parse(m.receivedDateTime) || Date.now() });
+          opruimen.push({ soort: 'mail', m: m, H: H });
+        });
+      });
+    }).then(null, function () {});
+  }
+
+  function brievenbus() {
+    opruimen = [];
+    var voor = items.length;
+    return haalBestanden().then(haalMail).then(function () {
+      if (items.length !== voor) { persist(); render(); }
+    });
+  }
+
+  function mailMapId(H) {
+    return fetch(GRAPH + "/me/mailFolders?$filter=displayName eq '" + MAILMAP + "'&$select=id", { headers: H })
+      .then(function (r) { return r.json(); }).then(function (j) {
+        if (j.value && j.value[0]) return j.value[0].id;
+        return fetch(GRAPH + '/me/mailFolders', { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, H),
+          body: JSON.stringify({ displayName: MAILMAP }) }).then(function (r) { return r.json(); }).then(function (n) { return n.id; });
+      });
+  }
+
+  function ruimBrievenbusOp() {
+    var klus = opruimen; opruimen = [];
+    if (!klus.length) return Promise.resolve();
+    var mapId = null;
+    return klus.reduce(function (p, k) {
+      return p.then(function () {
+        if (k.soort === 'bestand') {
+          if (k.tekst) return gfetch('/me/drive/items/' + k.f.id, { method: 'DELETE' });
+          return gfetch('/me/drive/root:/' + encPad(CFG.folder + '/' + BIJLAGEN), { method: 'GET' }).then(function (r) {
+            if (r.ok) return r.json();
+            return gfetch('/me/drive/root:/' + encPad(CFG.folder) + ':/children', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: BIJLAGEN, folder: {}, '@microsoft.graph.conflictBehavior': 'replace' }) }).then(function (r) { return r.json(); });
+          }).then(function (map) {
+            return gfetch('/me/drive/items/' + k.f.id + '?@microsoft.graph.conflictBehavior=rename', { method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ parentReference: { id: map.id } }) });
+          });
+        }
+        return (mapId ? Promise.resolve(mapId) : mailMapId(k.H).then(function (id) { mapId = id; return id; })).then(function (id) {
+          if (!id) return;
+          return fetch(GRAPH + '/me/messages/' + encodeURIComponent(k.m.id) + '/move', { method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' }, k.H), body: JSON.stringify({ destinationId: id }) });
+        });
+      }).then(null, function () {});      // lukt één ding niet, dan de volgende keer opnieuw
+    }, Promise.resolve());
+  }
+
   /* ---------- de sync zelf ---------- */
   var syncing = false, again = false, syncTimer = null;
 
@@ -839,8 +979,9 @@
     if (!navigator.onLine) { setStatus('offline'); return Promise.resolve(); }
     if (syncing) { again = true; return Promise.resolve(); }
     syncing = true; setStatus('busy');
-    return attempt(0).then(function () {
+    return brievenbus().then(function () { return attempt(0); }).then(function () {
       lastOk = Date.now(); lastError = ''; setStatus('ok');
+      return ruimBrievenbusOp();
     }, function (e) {
       if (e.auth) { setStatus('off'); lastError = e.message; }
       else if (e instanceof TypeError || !navigator.onLine) { setStatus('offline'); }
