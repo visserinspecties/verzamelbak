@@ -87,6 +87,9 @@
     opacity: .9;
   }
   .word .due.now { color: var(--accent); }
+  /* Deadline is vandaag (of voorbij) en nog niet bekeken: datum knippert langzaam */
+  .word .due.blink { font-weight: 700; animation: dueBlink 2.4s ease-in-out infinite; }
+  @keyframes dueBlink { 0%, 100% { opacity: 1; } 50% { opacity: .12; } }
 
   /* Markeerstift: slordige gele streep achter het woord. Alles in em, dus hij groeit en krimpt mee met het woord. */
   .word { position: relative; isolation: isolate; }
@@ -118,11 +121,17 @@
   .ico input[type=date] {
     position: absolute; inset: 0; width: 100%; height: 100%;
     opacity: 0; border: 0; padding: 0; margin: 0; font-size: 16px; cursor: pointer;
+    /* iPhone/Safari geeft een datumveld anders een eigen minimale breedte, waardoor het tikvlak
+       rechts naast het icoon kwam te liggen. Zonder eigen opmaak volgt het precies het icoon. */
+    -webkit-appearance: none; appearance: none; min-width: 0; max-width: 100%;
+    box-sizing: border-box; display: block; background: transparent; color: transparent;
   }
+  .ico input[type=date]::-webkit-date-and-time-value { text-align: left; }
   #itemDlg { position: fixed; padding-top: 28px; }
   .dueline { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; color: var(--ink-soft); min-height: 24px; }
   .dueline.now { color: var(--accent); }
   .dueline button { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 10px; margin: -10px 0; cursor: pointer; text-decoration: underline; }
+  .dueline button.aan { color: var(--accent); }
   .addrow { display: flex; align-items: center; margin-top: 4px; }
   .addrow .ico { width: 44px; height: 44px; margin-left: -10px; }
   #editText { margin-top: 2px; }
@@ -293,7 +302,7 @@
   <textarea id="editText" style="display:none"></textarea>
   <p class="meta" id="itemMeta"></p>
   <p class="meta"><a id="itemLink" target="_blank" rel="noopener" style="display:none;color:inherit"></a></p>
-  <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button></div>
+  <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button><button id="itemDueBlink" type="button" style="display:none">knipper weer</button></div>
   <div id="viewRows">
     <div class="row">
       <button class="btn" id="itemUp">Belangrijker</button>
@@ -404,6 +413,12 @@
     if (d.getFullYear() !== t.getFullYear()) opts.year = 'numeric';
     return { text: d.toLocaleDateString('nl-NL', opts).replace('.', ''), now: d <= t };
   }
+  // Knipperen: deadline is vandaag of voorbij, en het item is sinds die deadline nog niet geopend.
+  // it.dueSeen bewaart de deadline waarbij je hem bekeken hebt; een nieuwe datum knippert dus weer.
+  function blinks(it) {
+    var di = dueInfo(it.due);
+    return !!(di && di.now && it.dueSeen !== it.due);
+  }
 
   function render() {
     var active = items.filter(function (i) { return !i.archived; });
@@ -438,7 +453,7 @@
           var di = dueInfo(item.due);
           if (di) {
             var ds = document.createElement('span');
-            ds.className = 'due' + (di.now ? ' now' : '');
+            ds.className = 'due' + (di.now ? ' now' : '') + (blinks(item) ? ' blink' : '');
             ds.textContent = di.text;
             b.appendChild(ds);
           }
@@ -503,6 +518,8 @@
   function openItem(id) {
     var it = find(id); if (!it) return;
     currentId = id;
+    // Geopend = gezien: de datum hoeft niet meer te knipperen
+    if (blinks(it)) { it.dueSeen = it.due; touch(it); save(); render(); }
     setEditMode(false);
     showItem(it);
     itemDlg.showModal();
@@ -542,6 +559,11 @@
     line.className = 'dueline' + (di && di.now ? ' now' : '');
     $('itemDueTxt').textContent = di ? 'Deadline ' + di.text : '';
     $('itemDue').value = it.due || '';
+    // "knipper weer" alleen als de deadline er is (vandaag of voorbij); tik nogmaals = weer uit
+    var kb = $('itemDueBlink');
+    kb.style.display = di && di.now ? '' : 'none';
+    kb.textContent = blinks(it) ? 'knippert ✓' : 'knipper weer';
+    kb.className = blinks(it) ? 'aan' : '';
     $('itemHl').className = 'ico' + (it.hl ? ' on' : '');
   }
   // Markeren aan/uit
@@ -578,6 +600,20 @@
     var v = $('itemDue').value;
     if (parseDue(v)) it.due = v; else delete it.due;
     touch(it); save(); render(); showItem(it);
+  });
+  $('itemDueBlink').addEventListener('click', function () {
+    var it = find(currentId); if (!it || !it.due) return;
+    if (blinks(it)) it.dueSeen = it.due; else delete it.dueSeen;
+    touch(it); save(); render(); showItem(it);
+  });
+  // Tik op het kalendericoontje (ook net ernaast) opent de datumkiezer
+  ['addDue', 'itemDue'].forEach(function (id) {
+    var inp = $(id);
+    inp.parentNode.addEventListener('click', function (e) {
+      if (e.target === inp) return;              // het veld zelf opent de kiezer al
+      try { if (inp.showPicker) { inp.showPicker(); return; } } catch (err) {}
+      inp.focus(); inp.click();
+    });
   });
   $('itemDueClear').addEventListener('click', function () {
     var it = find(currentId); if (!it) return;
@@ -1031,7 +1067,8 @@
   syncDlg.addEventListener('click', function (e) { if (e.target === syncDlg) syncDlg.close(); });
 
   // Wanneer synchroniseren: bij openen, bij terugkeer naar de app, bij weer online, en elke minuut
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) sync(); });
+  // (render erbij: als de app over middernacht open blijft, gaat een deadline van vandaag dan ook knipperen)
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) { render(); sync(); } });
   window.addEventListener('online', sync);
   setInterval(function () { if (!document.hidden) sync(); }, 60000);
 
