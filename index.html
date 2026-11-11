@@ -196,6 +196,20 @@
   }
   #syncBtn.err { color: var(--accent); opacity: .95; }
 
+  /* Aantal actief: alleen informatie, rechtsboven, net zo klein als archief en sync */
+  #activeCount {
+    position: fixed;
+    right: 0;
+    top: env(safe-area-inset-top);
+    min-height: 56px;
+    display: flex; align-items: center;
+    font-size: 12px;
+    color: var(--ink-soft);
+    opacity: .5;
+    padding: 0 18px;
+    pointer-events: none;   /* tikken gaat er dwars doorheen */
+  }
+
   /* Vensters */
   dialog {
     border: 0;
@@ -266,6 +280,7 @@
 <button id="add" aria-label="Iets in de emmer gooien">+</button>
 <button id="archiveBtn">archief</button>
 <button id="syncBtn">inloggen</button>
+<div id="activeCount" aria-live="polite"></div>
 
 <!-- Nieuw item -->
 <dialog id="addDlg">
@@ -481,6 +496,7 @@
     }
     var n = items.length - active.length;
     $('archiveBtn').textContent = n ? 'archief (' + n + ')' : 'archief';
+    $('activeCount').textContent = 'actief (' + active.length + ')';
   }
 
   // Nieuw item
