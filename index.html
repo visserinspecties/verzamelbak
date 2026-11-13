@@ -210,6 +210,62 @@
     pointer-events: none;   /* tikken gaat er dwars doorheen */
   }
 
+  /* Zoeken: klein vergrootglas linksboven, net zo rustig als de andere hoekjes */
+  #searchBtn {
+    position: fixed;
+    left: 0;
+    top: env(safe-area-inset-top);
+    min-width: 56px; min-height: 56px;
+    display: flex; align-items: center; justify-content: flex-start;
+    background: none; border: 0;
+    padding: 0 18px;
+    color: var(--ink-soft);
+    opacity: .5;
+    cursor: pointer;
+    z-index: 5;
+  }
+  #searchBtn svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; pointer-events: none; }
+  #searchBtn.on { opacity: 1; color: var(--accent); }
+  #searchBar {
+    position: fixed;
+    left: 56px; right: 96px;
+    top: env(safe-area-inset-top);
+    height: 56px;
+    display: none; align-items: center;
+    z-index: 5;
+  }
+  #searchBar.open { display: flex; }
+  #searchInput {
+    flex: 1; min-width: 0;
+    font: inherit;
+    font-size: 16px;            /* voorkomt inzoomen op iPhone */
+    color: var(--ink);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    padding: 7px 34px 7px 12px;
+    -webkit-appearance: none; appearance: none;
+  }
+  #searchInput:focus { outline: none; border-color: var(--ink-soft); }
+  #searchInput::-webkit-search-cancel-button { display: none; }
+  #searchClear {
+    position: absolute; right: 0; top: 6px;
+    width: 44px; height: 44px;
+    background: none; border: 0; padding: 0;
+    font-size: 20px; line-height: 1;
+    color: var(--ink-soft); cursor: pointer;
+  }
+  #archHits {
+    display: block;
+    margin: 18px auto 0;
+    flex-basis: 100%;
+    font: inherit; font-size: 13px;
+    color: var(--ink-soft);
+    background: none; border: 0;
+    padding: 12px; cursor: pointer;
+    text-decoration: underline;
+  }
+
   /* Vensters */
   dialog {
     border: 0;
@@ -281,6 +337,13 @@
 <button id="archiveBtn">archief</button>
 <button id="syncBtn">inloggen</button>
 <div id="activeCount" aria-live="polite"></div>
+<button id="searchBtn" aria-label="Zoeken">
+  <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>
+</button>
+<div id="searchBar">
+  <input type="search" id="searchInput" placeholder="Zoek in de emmer…" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Zoeken">
+  <button id="searchClear" aria-label="Zoeken sluiten">×</button>
+</div>
 
 <!-- Nieuw item -->
 <dialog id="addDlg">
@@ -339,6 +402,7 @@
 <!-- Archief -->
 <dialog id="archDlg">
   <h2>Archief</h2>
+  <p class="meta" id="archFilter" style="display:none;margin:-6px 0 8px"></p>
   <ul id="archiveList"></ul>
   <p class="meta" id="archEmpty">Niets in het archief.</p>
   <div class="row">
@@ -435,14 +499,29 @@
     return !!(di && di.now && it.dueSeen !== it.due);
   }
 
+  /* ---------- zoeken ----------
+     Zoekt in de hele tekst (niet alleen de twee woorden in de wolk), zonder op hoofdletters
+     of accenten te letten. Meerdere woorden: alle woorden moeten erin voorkomen. */
+  var query = '';
+  function norm(s) {
+    return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/✓ /g, '');
+  }
+  function matches(it) {
+    var q = norm(query).trim();
+    if (!q) return true;
+    var hay = norm(it.text + ' ' + (dueInfo(it.due) || {}).text);
+    return q.split(/\s+/).every(function (w) { return hay.indexOf(w) > -1; });
+  }
+
   function render() {
-    var active = items.filter(function (i) { return !i.archived; });
+    var allActive = items.filter(function (i) { return !i.archived; });
+    var active = allActive.filter(matches);
     cloud.innerHTML = '';
 
     if (!active.length) {
       var p = document.createElement('p');
       p.className = 'empty';
-      p.textContent = 'De emmer is leeg. Gooi er iets in met het plusje.';
+      p.textContent = query.trim() ? 'Niets gevonden in de wolk.' : 'De emmer is leeg. Gooi er iets in met het plusje.';
       cloud.appendChild(p);
     } else {
       // Mengvolgorde is stabiel (op hash), zodat het amorf oogt maar niet verspringt
@@ -494,10 +573,44 @@
           cloud.appendChild(b);
         });
     }
-    var n = items.length - active.length;
+    var n = items.length - allActive.length;
     $('archiveBtn').textContent = n ? 'archief (' + n + ')' : 'archief';
-    $('activeCount').textContent = 'actief (' + active.length + ')';
+    if (query.trim()) {
+      $('activeCount').textContent = active.length + ' van ' + allActive.length;
+      // Ook treffers in het archief? Dan een linkje eronder.
+      var ah = items.filter(function (i) { return i.archived && matches(i); }).length;
+      if (ah) {
+        var a = document.createElement('button');
+        a.id = 'archHits';
+        a.textContent = ah === 1 ? 'ook 1 in het archief' : 'ook ' + ah + ' in het archief';
+        a.addEventListener('click', function () { renderArchive(); archDlg.showModal(); });
+        cloud.appendChild(a);
+      }
+    } else {
+      $('activeCount').textContent = 'actief (' + allActive.length + ')';
+    }
   }
+
+  var searchBtn = $('searchBtn'), searchBar = $('searchBar'), searchInput = $('searchInput');
+  function openSearch() {
+    searchBar.classList.add('open'); searchBtn.classList.add('on');
+    searchInput.focus();
+  }
+  function closeSearch() {
+    query = ''; searchInput.value = '';
+    searchBar.classList.remove('open'); searchBtn.classList.remove('on');
+    searchInput.blur();
+    render();
+  }
+  searchBtn.addEventListener('click', function () {
+    if (searchBar.classList.contains('open')) closeSearch(); else openSearch();
+  });
+  searchInput.addEventListener('input', function () { query = searchInput.value; render(); });
+  searchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeSearch();
+    if (e.key === 'Enter') searchInput.blur();     // toetsenbord weg, filter blijft staan
+  });
+  $('searchClear').addEventListener('click', closeSearch);
 
   // Nieuw item
   var addDlg = $('addDlg'), addText = $('addText');
@@ -655,8 +768,12 @@
   function renderArchive() {
     var list = $('archiveList');
     list.innerHTML = '';
-    var arch = items.filter(function (i) { return i.archived; })
+    var arch = items.filter(function (i) { return i.archived && matches(i); })
       .sort(function (a, b) { return (b.archivedAt || 0) - (a.archivedAt || 0); });
+    var af = $('archFilter');
+    af.style.display = query.trim() ? 'block' : 'none';
+    af.textContent = 'Gefilterd op "' + query.trim() + '"';
+    $('archEmpty').textContent = query.trim() ? 'Niets gevonden in het archief.' : 'Niets in het archief.';
     $('archEmpty').style.display = arch.length ? 'none' : 'block';
     arch.forEach(function (it) {
       var li = document.createElement('li');
