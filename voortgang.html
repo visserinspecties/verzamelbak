@@ -590,6 +590,25 @@
       var hgt = median((metric['Height'] || []).map(function (p) { return p.v; }));
       if (hgt) (metric['BMI'] || []).forEach(function (p) { if (wDay[p.d] != null) p.v = p.max = (wDay[p.d] - KLEDING) / Math.pow(hgt / 100, 2); });
     }
+    // Spiermassa als percentage van het (netto) gewicht, per meetdag.
+    var wNet = {};
+    (metric['Weight'] || []).forEach(function (p) { wNet[p.d] = p.v; });
+    var mp = (metric['Muscle Mass'] || []).filter(function (p) { return wNet[p.d] > 0; })
+      .map(function (p) { var v = p.v / wNet[p.d] * 100; return { t: p.t, d: p.d, v: v, max: v }; });
+    if (mp.length) metric['Muscle Perc'] = mp;
+    // Botmassa altijd in kg. Levert de export alleen een percentage, reken dat om
+    // met het gewicht zoals de weegschaal het mat (inclusief kleding).
+    var boneKg = null, bonePc = null;
+    Object.keys(metric).forEach(function (n) {
+      if (!/bone/i.test(n)) return;
+      if (/perc|%/i.test(n)) bonePc = bonePc || n; else boneKg = boneKg || n;
+    });
+    if (boneKg) metric['Bone KG'] = metric[boneKg];
+    else if (bonePc) {
+      var bk = metric[bonePc].filter(function (p) { return wNet[p.d] > 0; })
+        .map(function (p) { var v = p.v / 100 * (wNet[p.d] + KLEDING); return { t: p.t, d: p.d, v: v, max: v }; });
+      if (bk.length) metric['Bone KG'] = bk;
+    }
     Object.keys(metric).forEach(function (n) {           // lopende mediaan (5)
       var a = metric[n];
       a.forEach(function (p, i) {
@@ -1011,7 +1030,8 @@
   }
 
   function miniChart(box, pts, opts) {
-    var W = Math.max(260, box.clientWidth), H = 150, padL = 34, padR = 8, top = 10, bottom = 22;
+    var R = opts.right && opts.right.pts && opts.right.pts.length > 1 ? opts.right : null;
+    var W = Math.max(260, box.clientWidth), H = 150, padL = 34, padR = R ? 42 : 8, top = 10, bottom = 22;
     var t0 = pts[0].t - 3 * DAY, t1 = pts[pts.length - 1].t + 3 * DAY;
     var vs = pts.map(function (p) { return p.v; });
     var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs), pad = Math.max(opts.minPad || 0.5, (hi - lo) * 0.12);
@@ -1020,9 +1040,11 @@
     var y = function (v) { return top + (1 - (v - lo) / (hi - lo)) * (H - top - bottom); };
     var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': opts.label }, box);
     var ax = el('g', { class: 'axis' }, svg);
-    niceTicks(lo, hi, 3).forEach(function (v) {
+    var tkDec = function (ts) { return ts.some(function (v) { return Math.abs(v - Math.round(v)) > 1e-6; }) ? 1 : 0; };
+    var tk1 = niceTicks(lo, hi, 3), dec1 = Math.max(opts.tickDec || 0, tkDec(tk1));
+    tk1.forEach(function (v) {
       el('line', { x1: padL, x2: W - padR, y1: y(v), y2: y(v), stroke: css('--grid') }, ax);
-      el('text', { x: padL - 5, y: y(v) + 4, 'text-anchor': 'end' }, ax).textContent = fmt(v, opts.tickDec || 0);
+      el('text', { x: padL - 5, y: y(v) + 4, 'text-anchor': 'end' }, ax).textContent = fmt(v, dec1);
     });
     monthTicks(t0, t1, W - padL - padR).forEach(function (t, i) {
       el('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }, ax).textContent = mLabel(t, i === 0);
@@ -1031,7 +1053,22 @@
       var xa = Math.max(padL, x(p.a + DAY)), xb = Math.min(W - padR, x(p.b - DAY));
       if (xb > xa) el('rect', { x: xa, y: top, width: xb - xa, height: H - top - bottom, fill: css('--pause'), rx: 4 }, svg);
     });
+    // Tweede (rechter) as: eigen schaal, alleen labels, in de kleur van de lijn.
+    var y2 = null, rByDay = {};
+    if (R) {
+      var rv = R.pts.map(function (p) { return p.v; });
+      var lo2 = Math.min.apply(null, rv), hi2 = Math.max.apply(null, rv), pad2 = Math.max(R.minPad || 0.5, (hi2 - lo2) * 0.12);
+      lo2 -= pad2; hi2 += pad2;
+      y2 = function (v) { return top + (1 - (v - lo2) / (hi2 - lo2)) * (H - top - bottom); };
+      var tk2 = niceTicks(lo2, hi2, 3), dec2 = Math.max(R.tickDec || 0, tkDec(tk2));
+      tk2.forEach(function (v) {
+        el('text', { x: W - padR + 5, y: y2(v) + 4, 'text-anchor': 'start', style: 'fill:' + R.color }, ax).textContent = fmt(v, dec2) + R.unit;
+      });
+      R.pts.forEach(function (p) { rByDay[p.d] = p; });
+      R.pts.forEach(function (p) { el('circle', { cx: x(p.t), cy: y2(p.v), r: 2.2, fill: R.color, opacity: .3 }, svg); });
+    }
     pts.forEach(function (p) { el('circle', { cx: x(p.t), cy: y(p.v), r: 2.6, fill: css('--dot') }, svg); });
+    if (R) trendLine(svg, R.pts, x, y2, R.color);
     trendLine(svg, pts, x, y, css('--trend'));
     var tip = tipFor(box), ring = el('circle', { r: 5, fill: 'none', stroke: css('--ink'), 'stroke-width': 1.5, visibility: 'hidden' }, svg);
     var hit = el('rect', { x: padL, y: 0, width: W - padL - padR, height: H - bottom, fill: 'transparent' }, svg);
@@ -1042,12 +1079,24 @@
       var p = best.p; ring.setAttribute('cx', x(p.t)); ring.setAttribute('cy', y(p.v)); ring.setAttribute('visibility', 'visible');
       tip.show(x(p.t) * rect.width / W, y(p.v) * rect.height / H, function (t) {
         h('div', 't', dKort(p.t), t);
-        tipRow(t, 'Meting', fmt(p.v, opts.dec) + opts.unit);
-        tipRow(t, 'Trend', fmt(p.trend, opts.dec) + opts.unit);
+        tipRow(t, R ? 'Meting kg' : 'Meting', fmt(p.v, opts.dec) + opts.unit, R ? css('--trend') : null);
+        tipRow(t, R ? 'Trend kg' : 'Trend', fmt(p.trend, opts.dec) + opts.unit);
+        var q = R && rByDay[p.d];
+        if (q) {
+          tipRow(t, R.tipLabel, fmt(q.v, R.dec) + R.unit, R.color);
+          tipRow(t, 'Trend %', fmt(q.trend, R.dec) + R.unit);
+        }
       });
     }
     hit.addEventListener('pointermove', move); hit.addEventListener('pointerdown', move);
     hit.addEventListener('pointerleave', function () { tip.hide(); ring.setAttribute('visibility', 'hidden'); });
+    if (R) {
+      var lg = h('div', 'legend', null, box); lg.style.cssText = 'margin-top:4px;font-size:12px';
+      var a = h('span', null, null, lg), sa = h('i', 'sw line', null, a); sa.style.background = css('--trend');
+      a.appendChild(document.createTextNode(opts.legend + ' (links)'));
+      var b = h('span', null, null, lg), sb = h('i', 'sw line', null, b); sb.style.background = R.color;
+      b.appendChild(document.createTextNode(R.legend + ' (rechts)'));
+    }
   }
 
   function drawBody() {
@@ -1055,7 +1104,8 @@
     var defs = [
       ['Weight', 'Gewicht', ' kg', 1, KLEDING ? 'Zonder sportkleding (' + fmt(KLEDING) + ' kg afgetrokken).' : 'Je totale gewicht.'],
       ['Fat mass Perc', 'Vetpercentage', '%', 1, KLEDING ? 'Aandeel vet, gecorrigeerd voor kleding.' : 'Aandeel vet in je lichaam.'],
-      ['Muscle Mass', 'Spiermassa', ' kg', 1, 'Spieren inclusief het vocht erin.'],
+      ['Muscle Mass', 'Spiermassa', ' kg', 1, 'Spieren inclusief het vocht erin. Rechts als percentage van je ' + (KLEDING ? 'netto ' : '') + 'gewicht.', 'Muscle Perc'],
+      ['Bone KG', 'Botmassa', ' kg', 1, 'Geschat gewicht van je botten; verandert in maanden nauwelijks.'],
       ['Visceral Fat Rating', 'Buikvet (visceraal)', '', 0, 'Vet rond de organen; 1–12 geldt als gezond.'],
       ['Metabolic Age', 'Metabole leeftijd', ' jr', 0, 'Schatting van je stofwisseling.'],
       ['Total Body Water Perc', 'Lichaamsvocht', '%', 1, 'Verklaart vaak de sprongen in vet en spier.']
@@ -1063,13 +1113,21 @@
     var todo = [];
     defs.forEach(function (d) {
       var pts = S.metric[d[0]]; if (!pts || pts.length < 2) return;
+      var rp = d[5] && S.metric[d[5]] && S.metric[d[5]].length > 1 ? S.metric[d[5]] : null;
       var c = h('div', 'card', null, box), hd = h('div', 'mini-h', null, c);
       h('h3', null, d[1], hd);
       var a = pts[0].trend, b = pts[pts.length - 1].trend;
-      h('span', 'now num', fmt(a, d[3]) + ' → ' + fmt(b, d[3]) + d[2], hd);
+      var now = fmt(a, d[3]) + ' → ' + fmt(b, d[3]) + d[2];
+      if (rp) now += ' · ' + fmt(rp[0].trend, 1) + ' → ' + fmt(rp[rp.length - 1].trend, 1) + '%';
+      h('span', 'now num', now, hd);
       h('div', 'sub', d[4], c).style.margin = '0 0 4px';
       var ch = h('div', 'chart', null, c);
-      todo.push([ch, pts, { label: d[1] + ' door de tijd', unit: d[2], dec: d[3], minPad: d[3] ? 0.5 : 1 }]);
+      var o = { label: d[1] + ' door de tijd', unit: d[2], dec: d[3], minPad: d[3] ? (d[0] === 'Bone KG' ? 0.2 : 0.5) : 1 };
+      if (rp) {
+        o.legend = 'kg';
+        o.right = { pts: rp, unit: '%', dec: 1, minPad: 0.5, color: css('--s1'), tipLabel: '% van gewicht', legend: '% van ' + (KLEDING ? 'netto ' : '') + 'gewicht' };
+      }
+      todo.push([ch, pts, o]);
     });
     todo.forEach(function (a) { miniChart(a[0], a[1], a[2]); });   // pas tekenen als het raster compleet is
   }
@@ -1134,7 +1192,7 @@
 
   function drawTable() {
     var box = $('table'); box.textContent = '';
-    var cols = [['Weight', 'Gewicht', 1], ['Fat mass Perc', 'Vet %', 1], ['Muscle Mass', 'Spier kg', 1], ['Visceral Fat Rating', 'Buikvet', 0], ['Total Body Water Perc', 'Vocht %', 1], ['Metabolic Age', 'Met. leeftijd', 0]];
+    var cols = [['Weight', 'Gewicht', 1], ['Fat mass Perc', 'Vet %', 1], ['Muscle Mass', 'Spier kg', 1], ['Muscle Perc', 'Spier %', 1], ['Bone KG', 'Bot kg', 1], ['Visceral Fat Rating', 'Buikvet', 0], ['Total Body Water Perc', 'Vocht %', 1], ['Metabolic Age', 'Met. leeftijd', 0]];
     var days = {};
     cols.forEach(function (c) { (S.metric[c[0]] || []).forEach(function (p) { (days[p.d] = days[p.d] || {})[c[0]] = p.v; }); });
     var keys = Object.keys(days).sort().reverse();
