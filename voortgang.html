@@ -597,6 +597,14 @@
     var mp = (metric['Muscle Mass'] || []).filter(function (p) { return wNet[p.d] > 0; })
       .map(function (p) { var v = p.v / wNet[p.d] * 100; return { t: p.t, d: p.d, v: v, max: v }; });
     if (mp.length) metric['Muscle Perc'] = mp;
+    // Vetmassa altijd in kg (al gecorrigeerd voor kleding). Ontbreekt die in de export,
+    // reken hem uit het vetpercentage en het gewicht zoals de weegschaal het mat.
+    if (metric['Fat Mass'] && metric['Fat Mass'].length) metric['Fat KG'] = metric['Fat Mass'];
+    else if (metric['Fat mass Perc']) {
+      var fk = metric['Fat mass Perc'].filter(function (p) { return wNet[p.d] > 0; })
+        .map(function (p) { var v = p.v / 100 * (wNet[p.d] + KLEDING) - KLEDING; return { t: p.t, d: p.d, v: v, max: v }; });
+      if (fk.length) metric['Fat KG'] = fk;
+    }
     // Botmassa altijd in kg. Levert de export alleen een percentage, reken dat om
     // met het gewicht zoals de weegschaal het mat (inclusief kleding).
     var boneKg = null, bonePc = null;
@@ -1162,7 +1170,7 @@
     box = box || $('body'); box.textContent = '';
     var defs = [
       ['Weight', 'Gewicht', ' kg', 1, KLEDING ? 'Zonder sportkleding (' + fmt(KLEDING) + ' kg afgetrokken).' : 'Je totale gewicht.'],
-      ['Fat mass Perc', 'Vetpercentage', '%', 1, KLEDING ? 'Aandeel vet, gecorrigeerd voor kleding.' : 'Aandeel vet in je lichaam.'],
+      ['Fat KG', 'Vetmassa', ' kg', 1, (KLEDING ? 'Vet in kilo’s, gecorrigeerd voor kleding.' : 'Vet in kilo’s.') + ' Rechts als percentage van je ' + (KLEDING ? 'netto ' : '') + 'gewicht (vetpercentage).', 'Fat mass Perc'],
       ['Muscle Mass', 'Spiermassa', ' kg', 1, 'Spieren inclusief het vocht erin. Rechts als percentage van je ' + (KLEDING ? 'netto ' : '') + 'gewicht.', 'Muscle Perc'],
       ['Bone KG', 'Botmassa', ' kg', 1, 'Geschat gewicht van je botten; verandert in maanden nauwelijks.'],
       ['Visceral Fat Rating', 'Buikvet (visceraal)', '', 0, 'Vet rond de organen; 1–12 geldt als gezond.'],
@@ -1171,7 +1179,11 @@
     ];
     var todo = [];
     defs.forEach(function (d) {
-      var pts = S.metric[d[0]]; if (!pts || pts.length < 2) return;
+      var pts = S.metric[d[0]];
+      if ((!pts || pts.length < 2) && d[0] === 'Fat KG') {      // geen vet in kg: dan alleen het percentage
+        pts = S.metric['Fat mass Perc']; d = ['Fat mass Perc', 'Vetpercentage', '%', 1, KLEDING ? 'Aandeel vet, gecorrigeerd voor kleding.' : 'Aandeel vet in je lichaam.'];
+      }
+      if (!pts || pts.length < 2) return;
       var rp = d[5] && S.metric[d[5]] && S.metric[d[5]].length > 1 ? S.metric[d[5]] : null;
       var c = h('div', 'card', null, box), hd = h('div', 'mini-h', null, c);
       h('h3', null, d[1], hd);
@@ -1251,7 +1263,7 @@
 
   function drawTable() {
     var box = $('table'); box.textContent = '';
-    var cols = [['Weight', 'Gewicht', 1], ['Fat mass Perc', 'Vet %', 1], ['Muscle Mass', 'Spier kg', 1], ['Muscle Perc', 'Spier %', 1], ['Bone KG', 'Bot kg', 1], ['Visceral Fat Rating', 'Buikvet', 0], ['Total Body Water Perc', 'Vocht %', 1], ['Metabolic Age', 'Met. leeftijd', 0]];
+    var cols = [['Weight', 'Gewicht', 1], ['Fat KG', 'Vet kg', 1], ['Fat mass Perc', 'Vet %', 1], ['Muscle Mass', 'Spier kg', 1], ['Muscle Perc', 'Spier %', 1], ['Bone KG', 'Bot kg', 1], ['Visceral Fat Rating', 'Buikvet', 0], ['Total Body Water Perc', 'Vocht %', 1], ['Metabolic Age', 'Met. leeftijd', 0]];
     var days = {};
     cols.forEach(function (c) { (S.metric[c[0]] || []).forEach(function (p) { (days[p.d] = days[p.d] || {})[c[0]] = p.v; }); });
     var keys = Object.keys(days).sort().reverse();
