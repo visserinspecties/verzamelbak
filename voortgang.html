@@ -41,7 +41,7 @@
     --bad: #b8322f;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not(.print-light) {
       --bg: #1d1b18;
       --card: #292622;
       --ink: #efe8da;
@@ -168,6 +168,7 @@
       <div class="status" id="status">Bezig met laden…</div>
       <button id="btnRefresh" class="hidden" type="button">↻ Ververs</button>
       <label class="btn primary" id="btnAdd">＋ Export toevoegen<input id="fileIn" type="file" accept=".zip,.json,application/zip,application/json" multiple hidden></label>
+      <button id="btnReport" class="hidden" type="button">⇪ Rapport delen</button>
       <a class="btn hidden" id="btnLogin" href="./">Inloggen via Verzamelbak</a>
     </div>
     <div class="msg" id="msg" role="status" aria-live="polite"></div>
@@ -788,6 +789,8 @@
     var has = S.ind.length || S.out.length || Object.keys(S.metric).length;
     $('emptyState').classList.toggle('hidden', !!has);
     $('dash').classList.toggle('hidden', !has);
+    $('btnReport').classList.toggle('hidden', !has);
+    reportFile = null;
     if (!has) return;
     INS = insights(S);
     $('subtitle').textContent = 'John Visser · Technogym · ' + dKort(S.tMin) + ' – ' + dKort(S.tMax);
@@ -892,8 +895,8 @@
   }
   function mLabel(t, withYear) { var d = new Date(t); return MAAND[d.getMonth()] + (withYear || d.getMonth() === 0 ? ' ’' + String(d.getFullYear()).slice(2) : ''); }
 
-  function drawTimeline() {
-    var box = $('timeline'); box.textContent = '';
+  function drawTimeline(box) {
+    box = box || $('timeline'); box.textContent = '';
     var W = Math.max(300, box.clientWidth), narrow = W < 520;
     var padL = 40, padR = 10, top = 26, laneW = 110, gap = 30, laneB = 120, axisH = 22;
     var H = top + laneW + gap + laneB + axisH;
@@ -1155,8 +1158,8 @@
     }
   }
 
-  function drawBody() {
-    var box = $('body'); box.textContent = '';
+  function drawBody(box) {
+    box = box || $('body'); box.textContent = '';
     var defs = [
       ['Weight', 'Gewicht', ' kg', 1, KLEDING ? 'Zonder sportkleding (' + fmt(KLEDING) + ' kg afgetrokken).' : 'Je totale gewicht.'],
       ['Fat mass Perc', 'Vetpercentage', '%', 1, KLEDING ? 'Aandeel vet, gecorrigeerd voor kleding.' : 'Aandeel vet in je lichaam.'],
@@ -1188,8 +1191,8 @@
     todo.forEach(function (a) { miniChart(a[0], a[1], a[2]); });   // pas tekenen als het raster compleet is
   }
 
-  function drawStrength() {
-    var box = $('strength'); box.textContent = '';
+  function drawStrength(box) {
+    box = box || $('strength'); box.textContent = '';
     var st = strengthTests(S);
     if (!st.length) { h('p', 'sub', 'Nog geen herhaalde krachttests in de gegevens.', box); return; }
     var W = Math.max(300, box.clientWidth), narrow = W < 520, rowH = narrow ? 50 : 36, labW = narrow ? 0 : 150, padR = narrow ? 8 : 150;
@@ -1218,8 +1221,8 @@
     var b = h('span', null, null, lg), sb = h('i', 'sw', null, b); sb.style.cssText = 'background:' + css('--s1') + ';border-radius:50%'; b.appendChild(document.createTextNode('Beste test'));
   }
 
-  function drawWeekday() {
-    var box = $('weekday'); box.textContent = '';
+  function drawWeekday(box) {
+    box = box || $('weekday'); box.textContent = '';
     var wd = [0, 0, 0, 0, 0, 0, 0];
     S.gymDayList.forEach(function (t) { wd[(new Date(t).getDay() + 6) % 7]++; });
     var W = Math.max(280, box.clientWidth), H = 150, padB = 22, top = 18;
@@ -1261,6 +1264,254 @@
       cols.forEach(function (c) { h('td', 'num', fmt(days[k][c[0]], c[2]), r); });
     });
   }
+
+  /* ===================================================================
+     7b. Rapport (pdf, liggend A4) maken en delen
+     Elke pagina wordt op een canvas getekend (tekst + de grafieken van de pagina
+     zelf, opnieuw getekend op rapportbreedte en in lichte kleuren) en daarna
+     als afbeelding in een pdf gezet met jsPDF.
+     =================================================================== */
+  var jspdfP = null;
+  function loadJsPDF() {
+    if (!jspdfP) jspdfP = new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      s.onload = function () { res(window.jspdf.jsPDF); };
+      s.onerror = function () { jspdfP = null; rej(new Error('De pdf-hulp kon niet laden (geen internet?)')); };
+      document.head.appendChild(s);
+    });
+    return jspdfP;
+  }
+
+  // SVG uit de pagina → afbeelding, met de opmaak uit de stylesheet erin gezet
+  var STYLE_PROPS = ['fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linecap', 'opacity', 'fill-opacity',
+    'font-size', 'font-weight', 'text-anchor', 'dominant-baseline'];
+  function svgToImage(svg) {
+    var W = +svg.getAttribute('viewBox').split(' ')[2], H = +svg.getAttribute('viewBox').split(' ')[3];
+    var clone = svg.cloneNode(true), src = svg.querySelectorAll('*'), dst = clone.querySelectorAll('*');
+    for (var i = 0; i < src.length; i++) {
+      var cs = getComputedStyle(src[i]), st = '';
+      STYLE_PROPS.forEach(function (p) { var v = cs.getPropertyValue(p); if (v) st += p + ':' + v + ';'; });
+      if (src[i].tagName === 'text') st += 'font-family:Helvetica,Arial,sans-serif;';
+      dst[i].setAttribute('style', st + (dst[i].getAttribute('style') || ''));
+      if (dst[i].tagName === 'title') dst[i].textContent = '';
+    }
+    clone.setAttribute('xmlns', NS); clone.setAttribute('width', W); clone.setAttribute('height', H);
+    var url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(clone));
+    return new Promise(function (res, rej) {
+      var img = new Image();
+      img.onload = function () { res({ img: img, w: W, h: H }); };
+      img.onerror = function () { rej(new Error('Grafiek kon niet worden omgezet')); };
+      img.src = url;
+    });
+  }
+
+  function buildReport() {
+    var PW = 1123, PH = 794, M = 40, SC = 3, CW = PW - 2 * M;     // A4 liggend in css-pixels
+    var SERIF = 'Merriweather, Georgia, serif', SANS = 'Helvetica, Arial, sans-serif';
+    var root = document.documentElement, oldRange = range;
+    root.classList.add('print-light');
+    var col = { ink: css('--ink'), ink2: css('--ink-2'), soft: css('--ink-soft'), line: css('--line'), accent: css('--accent'), good: css('--good'), bad: css('--bad'), card: css('--card') };
+    // grafieken opnieuw tekenen op rapportbreedte, buiten beeld
+    var off = h('div', null, null, document.body);
+    off.style.cssText = 'position:fixed;left:-30000px;top:0;width:' + CW + 'px;pointer-events:none';
+    var colW = Math.floor((CW - 2 * 16) / 3);
+    var tl = h('div', 'chart', null, off); tl.style.width = CW + 'px';
+    var bd = h('div', 'multi', null, off); bd.style.cssText = 'display:grid;grid-template-columns:repeat(3,' + colW + 'px);gap:16px';
+    var stW = Math.round(CW * 0.6), wdW = CW - stW - 24;
+    var stB = h('div', 'chart', null, off); stB.style.width = stW + 'px';
+    var wdB = h('div', 'chart', null, off); wdB.style.width = wdW + 'px';
+    var parts;
+    try {
+      range = 0;
+      drawTimeline(tl); drawBody(bd); drawStrength(stB); drawWeekday(wdB);
+      var legendOf = function (box) {
+        return Array.prototype.map.call(box.querySelectorAll('.legend span'), function (sp) {
+          var sw = sp.querySelector('.sw'), cs = sw ? getComputedStyle(sw) : null;
+          return { text: sp.textContent, color: cs ? (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? cs.backgroundColor : cs.borderColor) : col.ink, line: sw && sw.classList.contains('line'), ring: cs && cs.backgroundColor === 'rgba(0, 0, 0, 0)' };
+        });
+      };
+      var tlLegend = legendOf(document.querySelector('.tl-head'));
+      var cards = Array.prototype.map.call(bd.querySelectorAll('.card'), function (c) {
+        return { title: c.querySelector('h3').textContent, now: (c.querySelector('.now') || {}).textContent || '', svg: c.querySelector('svg'), legend: legendOf(c) };
+      });
+      var kpis = Array.prototype.map.call($('kpis').querySelectorAll('.kpi'), function (k) {
+        var v = k.querySelector('.val'), sm = v.querySelector('small'), ch = k.querySelector('.chg'), sp = ch && ch.querySelector('span');
+        return { lbl: k.querySelector('.lbl').textContent, val: v.firstChild ? v.firstChild.textContent : '', unit: sm ? sm.textContent : '',
+          chg: ch ? ch.textContent : '', delta: sp ? sp.textContent : '', cls: sp ? sp.className : '' };
+      });
+      var stLegend = legendOf(stB);
+      var svgs = [tl.querySelector('svg'), stB.querySelector('svg'), wdB.querySelector('svg')].concat(cards.map(function (c) { return c.svg; }));
+      parts = Promise.all(svgs.map(function (s) { return s ? svgToImage(s) : Promise.resolve(null); })).then(function (imgs) {
+        return { imgs: imgs, cards: cards, kpis: kpis, tlLegend: tlLegend, stLegend: stLegend };
+      });
+    } catch (e) { parts = Promise.reject(e); }
+    function cleanup() {
+      range = oldRange; off.remove(); root.classList.remove('print-light');
+    }
+    return Promise.all([parts, document.fonts ? document.fonts.load('700 20px Merriweather').catch(function () {}) : null])
+      .then(function (r) { cleanup(); return r[0]; }, function (e) { cleanup(); throw e; })
+      .then(function (P) {
+        var pages = [], ctx, pageNr = 0;
+        var stamp = 'Gemaakt op ' + dKort(Date.now());
+        function newPage(title) {
+          var c = document.createElement('canvas'); c.width = PW * SC; c.height = PH * SC;
+          ctx = c.getContext('2d'); ctx.scale(SC, SC);
+          ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, PW, PH);
+          pages.push(c); pageNr++;
+          // kop en voet
+          txt('Voortgang', M, M + 4, '700 22px ' + SERIF, col.ink);
+          txt('John Visser · Technogym · ' + dKort(S.tMin) + ' – ' + dKort(S.tMax), M + 140, M + 2, '14px ' + SANS, col.ink2);
+          txt(stamp, PW - M, M + 2, '12px ' + SANS, col.soft, 'right');
+          ctx.fillStyle = col.line; ctx.fillRect(M, M + 16, CW, 1);
+          txt('pagina ' + pageNr, PW - M, PH - 22, '11px ' + SANS, col.soft, 'right');
+          if (title) txt(title, M, M + 50, '700 17px ' + SERIF, col.ink);
+          return M + 66;
+        }
+        function txt(s, x, y, font, color, align) {
+          ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align || 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(s, x, y);
+          return ctx.measureText(s).width;
+        }
+        function wrap(s, x, y, w, font, color, lh) {
+          ctx.font = font; var words = String(s).split(/\s+/), line = '', n = 0;
+          words.forEach(function (wd) {
+            var t = line ? line + ' ' + wd : wd;
+            if (ctx.measureText(t).width > w && line) { txt(line, x, y + n * lh, font, color); n++; line = wd; } else line = t;
+          });
+          if (line) { txt(line, x, y + n * lh, font, color); n++; }
+          return n * lh;
+        }
+        function linesOf(s, w, font) {
+          ctx.font = font; var words = String(s).split(/\s+/), line = '', n = 0;
+          words.forEach(function (wd) { var t = line ? line + ' ' + wd : wd; if (ctx.measureText(t).width > w && line) { n++; line = wd; } else line = t; });
+          return n + (line ? 1 : 0);
+        }
+        function image(o, x, y, w) { if (!o) return 0; var hh = o.h * w / o.w; ctx.drawImage(o.img, x, y, w, hh); return hh; }
+        function legend(items, x, y) {
+          items.forEach(function (it) {
+            ctx.fillStyle = it.color; ctx.strokeStyle = it.color;
+            if (it.line) ctx.fillRect(x, y - 5, 16, 2);
+            else if (it.ring) { ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x + 6, y - 4, 5, 0, 7); ctx.stroke(); }
+            else { ctx.beginPath(); ctx.arc(x + 6, y - 4, 5, 0, 7); ctx.fill(); }
+            x += 22 + txt(it.text, x + 22, y, '12px ' + SANS, col.ink2) + 16;
+          });
+        }
+        function box(x, y, w, hh) {
+          ctx.fillStyle = '#fbf8f2'; ctx.strokeStyle = col.line; ctx.lineWidth = 1;
+          ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, w, hh, 10); else ctx.rect(x, y, w, hh); ctx.fill(); ctx.stroke();
+        }
+
+        // ---- pagina 1: kerncijfers + tijdlijn
+        var y = newPage(null) - 30;
+        var kn = P.kpis.length, kw = (CW - (kn - 1) * 10) / Math.max(1, kn);
+        P.kpis.forEach(function (k, i) {
+          var x = M + i * (kw + 10);
+          box(x, y, kw, 84);
+          txt(k.lbl, x + 12, y + 22, '12px ' + SANS, col.soft);
+          var vw = txt(k.val, x + 12, y + 52, '700 22px ' + SERIF, col.ink);
+          if (k.unit) txt(k.unit, x + 14 + vw, y + 52, '13px ' + SANS, col.ink2);
+          var cx = x + 12;
+          if (k.delta) cx += txt(k.delta, cx, y + 72, '600 12px ' + SANS, k.cls === 'good' ? col.good : k.cls === 'bad' ? col.bad : col.ink2);
+          txt(k.delta ? k.chg.slice(k.delta.length) : k.chg, cx, y + 72, '12px ' + SANS, col.ink2);
+        });
+        y += 84 + 34;
+        txt('Tijdlijn', M, y, '700 17px ' + SERIF, col.ink);
+        txt('Gewicht en trainingsminuten per week. De genummerde rondjes verwijzen naar ‘Opvallend’.', M + 80, y, '13px ' + SANS, col.soft);
+        y += 22; legend(P.tlLegend, M, y + 2); y += 14;
+        var tli = P.imgs[0];
+        if (tli) { var maxH = PH - 50 - y, tw = Math.min(CW, tli.w * maxH / tli.h); image(tli, M, y, tw); }
+
+        // ---- pagina 2: lichaamssamenstelling
+        y = newPage('Lichaamssamenstelling');
+        txt('Grijze puntjes zijn losse metingen, de lijn is de trend. ' + (KLEDING ? 'Gewicht zonder sportkleding (' + fmt(KLEDING) + ' kg).' : ''), M + 210, M + 50, '13px ' + SANS, col.soft);
+        var rows = Math.max(1, Math.ceil(P.cards.length / 3)), cellW = (CW - 2 * 16) / 3, cellH = Math.min((PH - 52 - y) / rows - 10, 215);
+        P.cards.forEach(function (c, i) {
+          var r = Math.floor(i / 3), cc = i % 3, x = M + cc * (cellW + 16), yy = y + r * (cellH + 10);
+          box(x, yy, cellW, cellH);
+          txt(c.title, x + 12, yy + 22, '700 13px ' + SERIF, col.ink);
+          txt(c.now, x + cellW - 12, yy + 22, '12px ' + SANS, col.ink2, 'right');
+          var im = P.imgs[3 + i];
+          if (im) {
+            var avH = cellH - 34 - (c.legend.length ? 18 : 6), w = Math.min(cellW - 16, im.w * avH / im.h);
+            image(im, x + 8, yy + 30, w);
+          }
+          if (c.legend.length) legend(c.legend, x + 12, yy + cellH - 9);
+        });
+
+        // ---- pagina 3: kracht + trainingsritme + opvallend
+        var stI = P.imgs[1], wdI = P.imgs[2], topH = 0;
+        y = newPage(stI ? 'Kracht' : null);
+        if (stI) txt('Geschatte maximale kracht (1RM): eerste test → beste recente test.', M + 70, M + 50, '13px ' + SANS, col.soft);
+        if (stI) { var sh = Math.min(stI.h, 280), sw = stI.w * sh / stI.h; image(stI, M, y, sw); topH = sh; }
+        if (wdI) {
+          var wx = M + stW + 24;
+          txt('Trainingsritme', wx, y - 16, '700 15px ' + SERIF, col.ink);
+          topH = Math.max(topH, image(wdI, wx, y, wdW));
+          txt('Bezoeken per weekdag.', wx, y + wdI.h * wdW / wdI.w + 18, '12px ' + SANS, col.soft);
+        }
+        y += topH + 36;
+        var items = INS.dated.map(function (it) { return { nr: String(it.nr), title: it.title, text: it.text }; })
+          .concat(INS.free.map(function (it) { return { nr: '•', title: it.title, text: it.text }; }));
+        if (items.length) {
+          txt('Opvallend', M, y, '700 17px ' + SERIF, col.ink); y += 18;
+          var colIW = (CW - 24) / 2, cxs = [M, M + colIW + 24], ci = 0, ys = [y, y];
+          var TF = '700 13px ' + SANS, BF = '12.5px ' + SANS, LH = 17;
+          items.forEach(function (it) {
+            var need = 6 + 18 + linesOf(it.text, colIW - 34, BF) * LH + 12;
+            if (ys[ci] + need > PH - 50) { ci++; }
+            if (ci > 1) { y = newPage('Opvallend (vervolg)'); ys = [y, y]; ci = 0; }
+            var x = cxs[ci], yy = ys[ci];
+            ctx.fillStyle = it.nr === '•' ? col.soft : col.accent; ctx.beginPath(); ctx.arc(x + 11, yy + 13, 10, 0, 7); ctx.fill();
+            txt(it.nr, x + 11, yy + 17.5, '700 11px ' + SANS, '#ffffff', 'center');
+            txt(it.title, x + 30, yy + 18, TF, col.ink);
+            var hh = wrap(it.text, x + 30, yy + 36, colIW - 34, BF, col.ink2, LH);
+            ys[ci] = yy + 24 + hh + 12;
+          });
+        }
+
+        return loadJsPDF().then(function (JsPDF) {
+          var pdf = new JsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4', compress: true });
+          pages.forEach(function (c, i) {
+            if (i) pdf.addPage('a4', 'landscape');
+            pdf.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, 297, 210, undefined, 'FAST');
+          });
+          pdf.setProperties({ title: 'Voortgang John Visser', author: 'John Visser', subject: 'Voortgang sportschool' });
+          var d = new Date(), ds = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+          return new File([pdf.output('blob')], 'Voortgang John Visser ' + ds + '.pdf', { type: 'application/pdf' });
+        });
+      });
+  }
+
+  var reportFile = null;
+  function shareReport(file) {
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: 'Voortgang John Visser' });
+    }
+    var a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = file.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 30000);
+    return Promise.resolve();
+  }
+  $('btnReport').addEventListener('click', function () {
+    var b = $('btnReport');
+    if (reportFile) {                       // tweede tik: pdf ligt al klaar
+      shareReport(reportFile).catch(function (e) { if (e && e.name !== 'AbortError') setMsg('Delen lukte niet: ' + e.message, true); });
+      return;
+    }
+    b.disabled = true; b.textContent = 'Rapport maken…'; setMsg('');
+    buildReport().then(function (file) {
+      reportFile = file;
+      b.disabled = false; b.textContent = '⇪ PDF delen';
+      return shareReport(file).then(function () { setMsg(''); }, function (e) {
+        // iOS staat delen soms alleen toe direct na een tik: dan nog één keer tikken
+        if (e && e.name === 'AbortError') return;
+        setMsg('Het rapport is klaar. Tik op ‘PDF delen’ om het te versturen of te bewaren.');
+      });
+    }).catch(function (e) {
+      b.disabled = false; b.textContent = '⇪ Rapport delen';
+      setMsg('Rapport maken lukte niet: ' + (e && e.message || e), true);
+    });
+  });
 
   /* ===================================================================
      8. Start
