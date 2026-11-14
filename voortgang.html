@@ -246,6 +246,9 @@
   var GRAPH = 'https://graph.microsoft.com/v1.0';
   var TOK_KEY = 'verzamelbak.tok';  // gedeeld met de Verzamelbak (zelfde website)
   var DATA_KEY = 'voortgang.data.v1';
+  var KLED_KEY = 'voortgang.kleding';
+  // Sportkleding weegt mee op de weegschaal. Standaard 1,5 kg; aan te passen onderaan de pagina.
+  var KLEDING = (function () { var v = lsGet(KLED_KEY); return typeof v === 'number' && v >= 0 && v < 10 ? v : 1.5; })();
   var DAY = 864e5;
 
   var $ = function (id) { return document.getElementById(id); };
@@ -570,6 +573,22 @@
         return { t: Date.parse(d + 'T12:00:00'), d: d, v: avg, max: Math.max.apply(null, vs) };
       });
     });
+    // Kledingcorrectie. De weegschaal rekent vet uit als gewicht min vetvrije massa,
+    // dus de kleding telt als vet: gewicht en vetmassa gaan omlaag, vetpercentage opnieuw berekend.
+    // Spiermassa, vocht en botmassa (uit de stroommeting) blijven gelijk.
+    if (KLEDING) {
+      var wDay = {}, fmDay = {};
+      (metric['Weight'] || []).forEach(function (p) { wDay[p.d] = p.v; });
+      (metric['Fat Mass'] || []).forEach(function (p) { fmDay[p.d] = p.v; });
+      (metric['Weight'] || []).forEach(function (p) { p.v -= KLEDING; p.max -= KLEDING; });
+      (metric['Fat Mass'] || []).forEach(function (p) { p.v -= KLEDING; p.max -= KLEDING; });
+      (metric['Fat mass Perc'] || []).forEach(function (p) {
+        var w = wDay[p.d], fm = fmDay[p.d];
+        if (w != null && fm != null && w > KLEDING) p.v = p.max = (fm - KLEDING) / (w - KLEDING) * 100;
+      });
+      var hgt = median((metric['Height'] || []).map(function (p) { return p.v; }));
+      if (hgt) (metric['BMI'] || []).forEach(function (p) { if (wDay[p.d] != null) p.v = p.max = (wDay[p.d] - KLEDING) / Math.pow(hgt / 100, 2); });
+    }
     Object.keys(metric).forEach(function (n) {           // lopende mediaan (5)
       var a = metric[n];
       a.forEach(function (p, i) {
@@ -756,6 +775,16 @@
     var f = $('foot'); f.textContent = '';
     f.textContent = S.ind.length + ' oefeningen op apparaten, ' + S.out.length + ' activiteiten daarbuiten, ' + Object.keys(DATA.bio).length +
       ' meetwaarden. Bewaard op dit toestel' + (DATA.saved ? ' (' + dKort(DATA.saved) + ')' : '') + '.';
+    var kl = h('label', null, null, f); kl.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:10px';
+    kl.appendChild(document.createTextNode('Kleding aftrekken:'));
+    var ki = h('input', null, null, kl); ki.type = 'number'; ki.step = '0.1'; ki.min = '0'; ki.max = '9.9'; ki.value = String(KLEDING);
+    ki.style.cssText = 'width:64px;font:inherit;font-size:12px;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)';
+    kl.appendChild(document.createTextNode('kg'));
+    ki.addEventListener('change', function () {
+      var v = parseFloat(String(ki.value).replace(',', '.'));
+      if (!(v >= 0 && v < 10)) { ki.value = String(KLEDING); return; }
+      KLEDING = v; lsSet(KLED_KEY, v); render();
+    });
     var clr = h('button', null, 'Wis gegevens op dit toestel', null);
     clr.type = 'button'; clr.style.marginLeft = '10px'; clr.style.minHeight = '32px'; clr.style.fontSize = '12px';
     clr.addEventListener('click', function () {
@@ -785,7 +814,7 @@
       var last = a[a.length - 1];
       tile(label, fmt(last.trend, dec), unit, a.length > 1 ? { d: last.trend - a[0].trend, dec: dec, eps: eps, txt: 'sinds ' + MAAND[new Date(a[0].t).getMonth()] + ' ' + String(new Date(a[0].t).getFullYear()).slice(2) } : null, goodDown);
     }
-    m('Weight', 'Gewicht (trend)', 'kg', 1, true, 0.3);
+    m('Weight', KLEDING ? 'Netto gewicht' : 'Gewicht (trend)', 'kg', 1, true, 0.3);
     m('Fat mass Perc', 'Vetpercentage', '%', 1, true, 0.3);
     m('Muscle Mass', 'Spiermassa', 'kg', 1, false, 0.3);
     m('Visceral Fat Rating', 'Buikvet (visceraal)', '', 0, true, 0.5);
@@ -1023,8 +1052,8 @@
   function drawBody() {
     var box = $('body'); box.textContent = '';
     var defs = [
-      ['Weight', 'Gewicht', ' kg', 1, 'Je totale gewicht.'],
-      ['Fat mass Perc', 'Vetpercentage', '%', 1, 'Aandeel vet in je lichaam.'],
+      ['Weight', 'Gewicht', ' kg', 1, KLEDING ? 'Zonder sportkleding (' + fmt(KLEDING) + ' kg afgetrokken).' : 'Je totale gewicht.'],
+      ['Fat mass Perc', 'Vetpercentage', '%', 1, KLEDING ? 'Aandeel vet, gecorrigeerd voor kleding.' : 'Aandeel vet in je lichaam.'],
       ['Muscle Mass', 'Spiermassa', ' kg', 1, 'Spieren inclusief het vocht erin.'],
       ['Visceral Fat Rating', 'Buikvet (visceraal)', '', 0, 'Vet rond de organen; 1–12 geldt als gezond.'],
       ['Metabolic Age', 'Metabole leeftijd', ' jr', 0, 'Schatting van je stofwisseling.'],
