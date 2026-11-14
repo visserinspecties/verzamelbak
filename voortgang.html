@@ -877,12 +877,13 @@
     return all.filter(function (t, i) { var m = new Date(t).getMonth(); return every === 1 || m % every === 0; });
   }
   // Trendlijn die bij een lange pauze overgaat in een stippellijn
-  function trendLine(parent, pts, xf, yf, color) {
+  function trendLine(parent, pts, xf, yf, color, breakDays) {
     var solid = '', dash = '';
     pts.forEach(function (p, i) {
       var X = xf(p.t).toFixed(1), Y = yf(p.trend).toFixed(1);
       if (!i) { solid += 'M' + X + ',' + Y; return; }
       var q = pts[i - 1], QX = xf(q.t).toFixed(1), QY = yf(q.trend).toFixed(1);
+      if (breakDays && (p.t - q.t) / DAY >= breakDays) { solid += 'M' + X + ',' + Y; return; }
       if ((p.t - q.t) / DAY > 45) { dash += 'M' + QX + ',' + QY + 'L' + X + ',' + Y; solid += 'M' + X + ',' + Y; }
       else solid += 'L' + X + ',' + Y;
     });
@@ -1036,22 +1037,77 @@
     var vs = pts.map(function (p) { return p.v; });
     var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs), pad = Math.max(opts.minPad || 0.5, (hi - lo) * 0.12);
     lo -= pad; hi += pad;
-    var x = function (t) { return padL + (t - t0) / (t1 - t0) * (W - padL - padR); };
+    // Gaten van 3 weken of langer zonder meting worden ingeklapt tot een smalle strook
+    // (as-onderbreking). Buiten die gaten loopt de tijd op echte schaal.
+    var plotW = W - padL - padR, STRIP = 26, EDGE = 3 * DAY;
+    var allT = pts.map(function (p) { return p.t; });
+    if (R) R.pts.forEach(function (p) { allT.push(p.t); });
+    allT.sort(function (a, b) { return a - b; });
+    var gaps = [];
+    for (var gi = 1; gi < allT.length; gi++) {
+      if (allT[gi] - allT[gi - 1] >= 21 * DAY) gaps.push({ a: allT[gi - 1] + EDGE, b: allT[gi] - EDGE, days: Math.round((allT[gi] - allT[gi - 1]) / DAY) });
+    }
+    var k = plotW / (t1 - t0);
+    for (var it = 0; it < 3; it++) {          // een gat dat al smaller is dan de strook blijft op echte schaal
+      var cut = gaps.filter(function (g) { return g.squeeze !== false; });
+      var real = (t1 - t0) - cut.reduce(function (a, g) { return a + (g.b - g.a); }, 0);
+      k = (plotW - cut.length * STRIP) / real;
+      gaps.forEach(function (g) { g.squeeze = (g.b - g.a) * k > STRIP; g.px = g.squeeze ? STRIP : (g.b - g.a) * k; });
+    }
+    var x = function (t) {
+      var px = 0, prev = t0;
+      for (var i = 0; i < gaps.length; i++) {
+        var g = gaps[i];
+        if (t <= g.a) break;
+        px += (g.a - prev) * k;
+        if (t < g.b) return padL + px + (t - g.a) / (g.b - g.a) * g.px;
+        px += g.px; prev = g.b;
+      }
+      return padL + px + (t - prev) * k;
+    };
     var y = function (v) { return top + (1 - (v - lo) / (hi - lo)) * (H - top - bottom); };
     var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': opts.label }, box);
     var ax = el('g', { class: 'axis' }, svg);
+    var strips = gaps.map(function (g) {
+      var inPause = S.pauses.some(function (p) { return p.a <= g.a + EDGE + 2 * DAY && p.b >= g.b - EDGE - 2 * DAY; });
+      return { xa: x(g.a), xb: x(g.b), wk: Math.round(g.days / 7), pause: inPause };
+    });
+    strips.forEach(function (st) {
+      el('rect', { x: st.xa, y: top, width: st.xb - st.xa, height: H - top - bottom, fill: css('--pause'), rx: 4 }, svg);
+    });
     var tkDec = function (ts) { return ts.some(function (v) { return Math.abs(v - Math.round(v)) > 1e-6; }) ? 1 : 0; };
     var tk1 = niceTicks(lo, hi, 3), dec1 = Math.max(opts.tickDec || 0, tkDec(tk1));
-    tk1.forEach(function (v) {
-      el('line', { x1: padL, x2: W - padR, y1: y(v), y2: y(v), stroke: css('--grid') }, ax);
+    tk1.forEach(function (v) {              // rasterlijnen onderbroken bij elke strook
+      var xs = padL;
+      strips.forEach(function (st) {
+        if (st.xa > xs) el('line', { x1: xs, x2: st.xa, y1: y(v), y2: y(v), stroke: css('--grid') }, ax);
+        xs = st.xb;
+      });
+      if (W - padR > xs) el('line', { x1: xs, x2: W - padR, y1: y(v), y2: y(v), stroke: css('--grid') }, ax);
       el('text', { x: padL - 5, y: y(v) + 4, 'text-anchor': 'end' }, ax).textContent = fmt(v, dec1);
     });
-    monthTicks(t0, t1, W - padL - padR).forEach(function (t, i) {
-      el('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }, ax).textContent = mLabel(t, i === 0);
+    // Onder elke strook: zigzag op de as en het aantal weken
+    var base = H - bottom, busy = [];
+    strips.forEach(function (st) {
+      var cx = (st.xa + st.xb) / 2, z = 'M' + (st.xa + 1).toFixed(1) + ',' + base, n = 4, w = (st.xb - st.xa - 2) / n;
+      for (var zi = 1; zi <= n; zi++) z += 'L' + (st.xa + 1 + zi * w).toFixed(1) + ',' + (base + (zi % 2 ? -3 : 3));
+      el('path', { d: z, fill: 'none', stroke: css('--ink-soft'), 'stroke-width': 1.2, 'stroke-linejoin': 'round' }, svg);
+      var lb = el('text', { x: cx, y: H - 6, 'text-anchor': 'middle', style: 'font-size:10px' }, ax);
+      lb.textContent = st.wk + ' wk';
+      var tt = el('title', {}, lb); tt.textContent = st.wk + ' weken ' + (st.pause ? 'niet in de sportschool' : 'geen meting') + ' (as ingekort)';
+      busy.push([cx - 20, cx + 20]);
     });
-    S.pauses.forEach(function (p) {
-      var xa = Math.max(padL, x(p.a + DAY)), xb = Math.min(W - padR, x(p.b - DAY));
-      if (xb > xa) el('rect', { x: xa, y: top, width: xb - xa, height: H - top - bottom, fill: css('--pause'), rx: 4 }, svg);
+    var lastX = -1e9, first = true;
+    // alle maanden langs, en plaats wat past (niet in een strook, niet te dicht op elkaar)
+    var md = new Date(t0); md.setDate(1); md.setHours(0, 0, 0, 0); if (md.getTime() < t0) md.setMonth(md.getMonth() + 1);
+    var months = []; while (md.getTime() <= t1) { months.push(md.getTime()); md.setMonth(md.getMonth() + 1); }
+    months.forEach(function (t) {
+      var tx = x(t);
+      if (tx < padL + 12 || tx > W - padR - 12) return;
+      if (gaps.some(function (g) { return g.squeeze && t > g.a && t < g.b; })) return;
+      if (busy.some(function (r) { return tx > r[0] - 12 && tx < r[1] + 12; }) || tx - lastX < 46) return;
+      el('text', { x: tx, y: H - 6, 'text-anchor': 'middle' }, ax).textContent = mLabel(t, first);
+      lastX = tx; first = false;
     });
     // Tweede (rechter) as: eigen schaal, alleen labels, in de kleur van de lijn.
     var y2 = null, rByDay = {};
@@ -1068,8 +1124,8 @@
       R.pts.forEach(function (p) { el('circle', { cx: x(p.t), cy: y2(p.v), r: 2.2, fill: R.color, opacity: .3 }, svg); });
     }
     pts.forEach(function (p) { el('circle', { cx: x(p.t), cy: y(p.v), r: 2.6, fill: css('--dot') }, svg); });
-    if (R) trendLine(svg, R.pts, x, y2, R.color);
-    trendLine(svg, pts, x, y, css('--trend'));
+    if (R) trendLine(svg, R.pts, x, y2, R.color, 21);
+    trendLine(svg, pts, x, y, css('--trend'), 21);
     var tip = tipFor(box), ring = el('circle', { r: 5, fill: 'none', stroke: css('--ink'), 'stroke-width': 1.5, visibility: 'hidden' }, svg);
     var hit = el('rect', { x: padL, y: 0, width: W - padL - padR, height: H - bottom, fill: 'transparent' }, svg);
     function move(ev) {
