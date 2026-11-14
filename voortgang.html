@@ -1,0 +1,1148 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voortgang</title>
+<link rel="manifest" href="voortgang.webmanifest">
+<link rel="icon" href="voortgang-icon-192.png">
+<link rel="apple-touch-icon" href="voortgang-icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Voortgang">
+<meta name="theme-color" content="#f4efe6">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
+<!--
+  Voortgang — dashboard voor Technogym/mywellness-exports.
+  Deze pagina bevat GEEN persoonlijke gegevens. Ze leest de exports (zip of json)
+  uit OneDrive › Claudemmer › Sport, met de login van de Verzamelbak,
+  en bewaart een samengevoegde kopie alleen op het eigen toestel (localStorage).
+-->
+<style>
+  :root {
+    --bg: #f4efe6;
+    --card: #fffdf8;
+    --ink: #2b2620;
+    --ink-2: #5d564b;
+    --ink-soft: #8a8174;
+    --line: #e6ddcd;
+    --grid: #eee6d8;
+    --accent: #b5482a;
+    --s1: #2a78d6;   /* kracht  */
+    --s2: #eb6834;   /* cardio  */
+    --s3: #1baf7a;   /* buiten  */
+    --trend: #2b2620;
+    --dot: #b9ae9c;
+    --pause: rgba(138, 129, 116, .13);
+    --good: #0a7d0a;
+    --bad: #b8322f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1d1b18;
+      --card: #292622;
+      --ink: #efe8da;
+      --ink-2: #c9c0b0;
+      --ink-soft: #8d8576;
+      --line: #3b372f;
+      --grid: #34302a;
+      --accent: #e0714f;
+      --s1: #3987e5;
+      --s2: #d95926;
+      --s3: #199e70;
+      --trend: #efe8da;
+      --dot: #6a6356;
+      --pause: rgba(239, 232, 218, .07);
+      --good: #4cc24c;
+      --bad: #e66767;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px; line-height: 1.5;
+    padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 22px 16px 80px; }
+  h1, h2, h3 { font-family: Merriweather, Georgia, serif; font-weight: 700; margin: 0; }
+  h1 { font-size: 30px; letter-spacing: -.01em; }
+  h2 { font-size: 20px; margin: 38px 0 4px; }
+  .lead { color: var(--ink-2); margin: 4px 0 0; }
+  .sub { color: var(--ink-soft); font-size: 13px; margin: 2px 0 14px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* status / bron */
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 14px; }
+  .status { font-size: 13px; color: var(--ink-soft); flex: 1 1 260px; }
+  .status b { color: var(--ink-2); font-weight: 600; }
+  button, .btn {
+    font: inherit; font-size: 14px; border-radius: 999px; padding: 8px 14px; min-height: 40px;
+    border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer;
+    text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+  }
+  button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  /* KPI's */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 18px; }
+  .kpi .lbl { font-size: 13px; color: var(--ink-soft); }
+  .kpi .val { font-family: Merriweather, Georgia, serif; font-size: 26px; font-weight: 700; margin-top: 2px; }
+  .kpi .val small { font-size: 14px; font-weight: 400; color: var(--ink-2); margin-left: 2px; }
+  .kpi .chg { font-size: 13px; color: var(--ink-2); margin-top: 2px; }
+  .chg .up, .chg .down { font-weight: 600; }
+  .good { color: var(--good); } .bad { color: var(--bad); }
+
+  /* tijdlijn */
+  .ranges { display: inline-flex; gap: 4px; background: var(--bg); border-radius: 999px; padding: 3px; border: 1px solid var(--line); }
+  .ranges button { border: 0; min-height: 32px; padding: 4px 12px; background: transparent; font-size: 13px; }
+  .ranges button[aria-pressed="true"] { background: var(--card); box-shadow: 0 1px 2px rgba(0,0,0,.12); font-weight: 600; }
+  .tl-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--ink-2); }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .sw.line { height: 2px; border-radius: 1px; width: 16px; }
+  .sw.pause { background: var(--pause); border: 1px dashed var(--ink-soft); }
+  .chart { position: relative; width: 100%; }
+  .chart svg { display: block; width: 100%; overflow: visible; touch-action: pan-y; }
+  .axis text, .lane-lbl { font-size: 11px; fill: var(--ink-soft); }
+  .lane-lbl { font-weight: 600; fill: var(--ink-2); }
+  .tip {
+    position: absolute; pointer-events: none; z-index: 5; min-width: 150px; max-width: 240px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px;
+    font-size: 12.5px; box-shadow: 0 4px 16px rgba(0,0,0,.14); display: none; line-height: 1.45;
+  }
+  .tip .t { font-weight: 700; margin-bottom: 3px; }
+  .tip .r { display: flex; justify-content: space-between; gap: 12px; }
+  .tip .r span:first-child { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+  .marker { cursor: pointer; }
+  .marker circle { fill: var(--accent); stroke: var(--card); stroke-width: 2; }
+  .marker text { fill: #fff; font-size: 11px; font-weight: 700; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+
+  /* opvallend */
+  .insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+  .ins { display: flex; gap: 12px; scroll-margin-top: 16px; transition: box-shadow .3s; }
+  .ins.flash { box-shadow: 0 0 0 3px var(--accent); }
+  .badge {
+    flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--accent); color: #fff;
+    font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  }
+  .badge.plain { background: var(--ink-soft); }
+  .ins h3 { font-size: 15px; margin-bottom: 3px; }
+  .ins p { margin: 0; color: var(--ink-2); font-size: 14px; }
+
+  /* kleine grafieken */
+  .multi { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
+  .mini-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .mini-h h3 { font-size: 15px; }
+  .mini-h .now { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+  .note { font-size: 13px; color: var(--ink-soft); margin: 8px 0 0; }
+
+  /* tabel */
+  details summary { cursor: pointer; color: var(--ink-2); font-size: 14px; padding: 6px 0; }
+  .tbl-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--ink-soft); font-weight: 600; }
+
+  .empty { text-align: center; padding: 50px 16px; }
+  .empty p { color: var(--ink-2); max-width: 520px; margin: 10px auto; }
+  .hidden { display: none !important; }
+  .files { font-size: 13px; color: var(--ink-2); margin: 8px 0 0; padding-left: 18px; }
+  .msg { font-size: 13px; margin-top: 8px; }
+  .msg.err { color: var(--bad); }
+  footer { margin-top: 40px; font-size: 12px; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Voortgang</h1>
+    <p class="lead" id="subtitle">John Visser · Technogym</p>
+    <div class="bar">
+      <div class="status" id="status">Bezig met laden…</div>
+      <button id="btnRefresh" class="hidden" type="button">↻ Ververs</button>
+      <label class="btn primary" id="btnAdd">＋ Export toevoegen<input id="fileIn" type="file" accept=".zip,.json,application/zip,application/json" multiple hidden></label>
+      <a class="btn hidden" id="btnLogin" href="./">Inloggen via Verzamelbak</a>
+    </div>
+    <div class="msg" id="msg" role="status" aria-live="polite"></div>
+  </header>
+
+  <div id="emptyState" class="card empty hidden">
+    <h2 style="margin-top:0">Nog geen gegevens</h2>
+    <p>Zet een Technogym-export (het zip-bestand) in <b>OneDrive › Claudemmer › Sport</b>, of kies hierboven <b>Export toevoegen</b>. Oudere exports kun je er later gewoon bij zetten; dubbele metingen worden eruit gehaald.</p>
+  </div>
+
+  <main id="dash" class="hidden">
+    <section class="kpis" id="kpis" aria-label="Kerncijfers"></section>
+
+    <h2>Tijdlijn</h2>
+    <p class="sub">Gewicht en trainingsminuten per week. De genummerde rondjes verwijzen naar de uitleg onder ‘Opvallend’.</p>
+    <div class="card">
+      <div class="tl-head">
+        <div class="legend">
+          <span><i class="sw line" style="background:var(--trend)"></i>Gewicht (trend)</span>
+          <span><i class="sw" style="background:var(--s1)"></i>Kracht</span>
+          <span><i class="sw" style="background:var(--s2)"></i>Cardio binnen</span>
+          <span><i class="sw" style="background:var(--s3)"></i>Buiten / overig</span>
+          <span><i class="sw pause"></i>Pauze sportschool</span>
+        </div>
+        <div class="ranges" role="group" aria-label="Periode">
+          <button type="button" data-r="0" aria-pressed="true">Alles</button>
+          <button type="button" data-r="365">1 jaar</button>
+          <button type="button" data-r="182">6 mnd</button>
+          <button type="button" data-r="91">3 mnd</button>
+        </div>
+      </div>
+      <div class="chart" id="timeline"></div>
+    </div>
+
+    <h2>Opvallend</h2>
+    <p class="sub">Wordt automatisch opnieuw berekend als je een export toevoegt.</p>
+    <div class="insights" id="insights"></div>
+
+    <h2>Lichaamssamenstelling</h2>
+    <p class="sub">Grijze puntjes zijn losse metingen, de lijn is de trend (lopende mediaan van vijf metingen).</p>
+    <div class="multi" id="body"></div>
+    <p class="note">De weegschaal meet vet en spier met een zwak stroompje (bio-impedantie). Vocht, eten en het tijdstip maken een paar procent verschil. Vertrouw daarom de lijn meer dan één meting.</p>
+
+    <h2>Kracht</h2>
+    <p class="sub">Geschatte maximale kracht (1RM) bij de krachttests op de Biostrength-apparaten: eerste test → beste recente test.</p>
+    <div class="card"><div class="chart" id="strength"></div></div>
+
+    <h2>Trainingsritme</h2>
+    <p class="sub">Op welke dagen je naar de sportschool gaat.</p>
+    <div class="card"><div class="chart" id="weekday"></div></div>
+
+    <h2>Alle metingen</h2>
+    <details class="card">
+      <summary>Toon tabel met lichaamsmetingen</summary>
+      <div class="tbl-wrap" id="table"></div>
+    </details>
+
+    <footer id="foot"></footer>
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ===================================================================
+     1. Instellingen en hulpjes
+     =================================================================== */
+  var CFG = {                       // dezelfde app-registratie als de Verzamelbak
+    clientId: 'fdf237c9-bf46-47fa-ab3d-a8834a73e284',
+    tenant: '984fd1fb-3d68-4c94-aff2-47f699fb5dae',
+    scope: 'https://graph.microsoft.com/Files.ReadWrite offline_access'
+  };
+  var FOLDER = 'Claudemmer/Sport';
+  var AUTHORITY = 'https://login.microsoftonline.com/' + CFG.tenant + '/oauth2/v2.0';
+  var GRAPH = 'https://graph.microsoft.com/v1.0';
+  var TOK_KEY = 'verzamelbak.tok';  // gedeeld met de Verzamelbak (zelfde website)
+  var DATA_KEY = 'voortgang.data.v1';
+  var DAY = 864e5;
+
+  var $ = function (id) { return document.getElementById(id); };
+  var NS = 'http://www.w3.org/2000/svg';
+  function el(tag, attrs, parent) {
+    var e = document.createElementNS(NS, tag);
+    for (var k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function h(tag, cls, text, parent) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) {
+    try { if (v == null) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(v)); return true; }
+    catch (e) { return false; }
+  }
+  function fmt(n, d) {
+    if (n == null || isNaN(n)) return '–';
+    return n.toLocaleString('nl-NL', { minimumFractionDigits: d || 0, maximumFractionDigits: d == null ? 1 : d });
+  }
+  function signed(n, d) { return (n > 0 ? '+' : n < 0 ? '−' : '±') + fmt(Math.abs(n), d); }
+  var MAAND = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sep', 'okt', 'nov', 'dec'];
+  var MAAND_LANG = ['januari', 'februari', 'maart', 'april', 'mei', 'juni', 'juli', 'augustus', 'september', 'oktober', 'november', 'december'];
+  var DAGEN = ['maandag', 'dinsdag', 'woensdag', 'donderdag', 'vrijdag', 'zaterdag', 'zondag'];
+  function dKort(t) { var d = new Date(t); return d.getDate() + ' ' + MAAND[d.getMonth()] + ' ' + d.getFullYear(); }
+  function dLang(t) { var d = new Date(t); return d.getDate() + ' ' + MAAND_LANG[d.getMonth()] + ' ' + d.getFullYear(); }
+  function dayKey(t) { var d = new Date(t); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function dayStart(t) { var d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); }
+  function weekStart(t) { var d = new Date(dayStart(t)); var wd = (d.getDay() + 6) % 7; d.setDate(d.getDate() - wd); return d.getTime(); }
+  function parseDate(s) { return Date.parse(String(s).replace(/(\.\d+)/, '')); }
+  function median(a) { if (!a.length) return null; var s = a.slice().sort(function (x, y) { return x - y; }); var m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+  function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  function setMsg(t, err) { var m = $('msg'); m.textContent = t || ''; m.className = 'msg' + (err ? ' err' : ''); }
+
+  /* ===================================================================
+     2. Zip uitpakken (zonder bibliotheek; valt terug op JSZip van cdnjs)
+     =================================================================== */
+  function inflateRaw(bytes) {
+    var ds = new DecompressionStream('deflate-raw');
+    var stream = new Blob([bytes]).stream().pipeThrough(ds);
+    return new Response(stream).arrayBuffer();
+  }
+  function unzipNative(buf) {
+    var dv = new DataView(buf), u8 = new Uint8Array(buf), eocd = -1;
+    for (var i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 70000); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('Geen geldig zip-bestand');
+    var n = dv.getUint16(eocd + 10, true), p = dv.getUint32(eocd + 16, true), jobs = [];
+    var dec = new TextDecoder();
+    for (var k = 0; k < n; k++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('Zip-inhoud onleesbaar');
+      var method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+      var nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+      var off = dv.getUint32(p + 42, true);
+      var name = dec.decode(u8.subarray(p + 46, p + 46 + nl));
+      p += 46 + nl + xl + cl;
+      var lnl = dv.getUint16(off + 26, true), lxl = dv.getUint16(off + 28, true);
+      var start = off + 30 + lnl + lxl, data = u8.slice(start, start + csize);
+      if (/\/$/.test(name)) continue;
+      jobs.push((function (name, method, data) {
+        var pr = method === 0 ? Promise.resolve(data.buffer) : method === 8 ? inflateRaw(data) : Promise.reject(new Error('Onbekende zip-compressie'));
+        return pr.then(function (ab) { return { name: name, text: dec.decode(ab) }; });
+      })(name, method, data));
+    }
+    return Promise.all(jobs);
+  }
+  var jszipP = null;
+  function unzipJSZip(buf) {
+    if (!jszipP) jszipP = new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      s.onload = function () { res(window.JSZip); }; s.onerror = function () { rej(new Error('Zip-hulp kon niet laden')); };
+      document.head.appendChild(s);
+    });
+    return jszipP.then(function (JSZip) { return JSZip.loadAsync(buf); }).then(function (z) {
+      var out = [];
+      z.forEach(function (path, f) { if (!f.dir) out.push(f.async('string').then(function (t) { return { name: path, text: t }; })); });
+      return Promise.all(out);
+    });
+  }
+  function unzip(buf) {
+    if (typeof DecompressionStream === 'function') {
+      return unzipNative(buf).catch(function () { return unzipJSZip(buf); });
+    }
+    return unzipJSZip(buf);
+  }
+  // Bestand (naam + bytes) → lijst van {name, text} met json-inhoud
+  function filesFrom(name, buf) {
+    var u8 = new Uint8Array(buf);
+    if (u8[0] === 0x50 && u8[1] === 0x4b) return unzip(buf);
+    return Promise.resolve([{ name: name, text: new TextDecoder().decode(buf) }]);
+  }
+
+  /* ===================================================================
+     3. Export lezen en samenvoegen
+     =================================================================== */
+  function emptyData() { return { bio: {}, ind: {}, out: {}, files: {} }; }
+  var DATA = lsGet(DATA_KEY) || emptyData();
+
+  function prMap(list) { var o = {}; (list || []).forEach(function (p) { if (p && p.n != null) o[p.n] = p.v; }); return o; }
+  function classify(p) {
+    if ('RowingDistance' in p) return 'cardio';
+    if ('Pace' in p || 'Elevation' in p) return 'cardio';
+    if ('AvgRpm' in p || ('Level' in p && 'HDistance' in p)) return 'cardio';
+    if ('Rm1' in p || 'TotalIsoWeight' in p || 'AvgIsoWeight' in p) return 'kracht';
+    if ('HDistance' in p || 'AvgHr' in p) return 'cardio';
+    return 'overig';
+  }
+  function num(v) { var n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.')); return isFinite(n) ? n : null; }
+
+  // Voegt één json-bestand toe. Geeft het aantal nieuwe regels terug.
+  function ingestJson(text) {
+    var j; try { j = JSON.parse(text); } catch (e) { return 0; }
+    var added = 0;
+    if (Array.isArray(j)) {
+      j.forEach(function (x) {
+        if (!x || typeof x !== 'object') return;
+        if ('measuredOn' in x && 'name' in x) {
+          var v = num(x.value), t = parseDate(x.measuredOn);
+          if (v == null || !isFinite(t)) return;
+          var k = x.name + '|' + dayKey(t) + '|' + v;
+          if (!DATA.bio[k]) { DATA.bio[k] = { n: String(x.name), d: dayKey(t), v: v }; added++; }
+        } else if (x.performedData) {
+          var p = prMap(x.performedData.pr), ti = parseDate(x.on);
+          if (!isFinite(ti)) return;
+          var id = x.id || (ti + '|' + p.Duration + '|' + x.phId);
+          if (DATA.ind[id]) return;
+          DATA.ind[id] = {
+            t: ti, ph: String(x.phId || '').slice(0, 8), c: classify(p),
+            dur: num(p.Duration) || 0, mv: num(p.Move) || 0, cal: num(p.Calories) || 0,
+            rm1: num(p.Rm1), kg: num(p.TotalIsoWeight), hr: num(p.AvgHr)
+          };
+          added++;
+        } else if (x.physicalActivityData) {
+          var q = prMap(x.physicalActivityData.pr), to = parseDate(x.performedDate);
+          if (!isFinite(to)) return;
+          var oid = x.id || (to + '|' + q.Duration + '|' + x.activityName);
+          if (DATA.out[oid]) return;
+          DATA.out[oid] = {
+            t: to, nm: String(x.activityName || 'Activiteit'), gps: !!x.gpsData,
+            dur: num(q.Duration) || 0, mv: num(q.Move) || 0, cal: num(q.Calories) || 0,
+            dist: num(q.HDistance), hr: num(q.AvgHr)
+          };
+          added++;
+        }
+      });
+    } else if (j && typeof j === 'object' && j.birthDate) {
+      var b = String(j.birthDate);
+      if (/^\d{8}$/.test(b)) DATA.birth = b.slice(0, 4) + '-' + b.slice(4, 6) + '-' + b.slice(6, 8);
+    }
+    return added;
+  }
+  function ingestFile(label, buf) {
+    return filesFrom(label, buf).then(function (list) {
+      var added = 0;
+      list.forEach(function (f) { if (/\.json$/i.test(f.name) || list.length === 1) added += ingestJson(f.text); });
+      return added;
+    });
+  }
+  function save() {
+    DATA.saved = Date.now();
+    if (!lsSet(DATA_KEY, DATA)) setMsg('Let op: dit toestel kon de gegevens niet bewaren (geheugen vol of privémodus).', true);
+  }
+
+  /* ===================================================================
+     4. OneDrive (zelfde login als de Verzamelbak)
+     =================================================================== */
+  var tok = lsGet(TOK_KEY);
+  function tokenRequest(params) {
+    return fetch(AUTHORITY + '/token', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(params).toString()
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) { var e = new Error(j.error_description || j.error || 'Inloggen mislukt'); e.status = r.status; throw e; }
+        tok = { access: j.access_token, refresh: j.refresh_token || (tok && tok.refresh), exp: Date.now() + (j.expires_in || 3600) * 1000 };
+        lsSet(TOK_KEY, tok);
+        return tok;
+      });
+    });
+  }
+  function authErr() { var e = new Error('Niet ingelogd'); e.auth = true; return e; }
+  function getToken() {
+    tok = lsGet(TOK_KEY) || tok;    // de Verzamelbak kan intussen ververst hebben
+    if (tok && tok.access && tok.exp > Date.now() + 60000) return Promise.resolve(tok.access);
+    if (tok && tok.refresh) {
+      return tokenRequest({ grant_type: 'refresh_token', client_id: CFG.clientId, refresh_token: tok.refresh, scope: CFG.scope })
+        .then(function (t) { return t.access; }, function (e) {
+          if (e.status === 400 || e.status === 401) { tok = null; lsSet(TOK_KEY, null); throw authErr(); }
+          throw e;
+        });
+    }
+    return Promise.reject(authErr());
+  }
+  function gfetch(path, opts) {
+    return getToken().then(function (t) {
+      opts = opts || {};
+      opts.headers = Object.assign({ Authorization: 'Bearer ' + t }, opts.headers || {});
+      return fetch(GRAPH + path, opts);
+    });
+  }
+  function encPath(p) { return p.split('/').map(encodeURIComponent).join('/'); }
+  function ensureFolder() {
+    function mk(parentPath, name) {
+      var url = parentPath ? '/me/drive/root:/' + encPath(parentPath) + ':/children' : '/me/drive/root/children';
+      return gfetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, folder: {}, '@microsoft.graph.conflictBehavior': 'fail' })
+      }).then(function (r) { if (!r.ok && r.status !== 409) throw new Error('Map aanmaken mislukt (' + r.status + ')'); });
+    }
+    return mk('', 'Claudemmer').then(function () { return mk('Claudemmer', 'Sport'); });
+  }
+  function listRemote() {
+    return gfetch('/me/drive/root:/' + encPath(FOLDER) + ':/children?$top=200&$select=id,name,size,eTag,lastModifiedDateTime,file')
+      .then(function (r) {
+        if (r.status === 404) return [];
+        if (!r.ok) throw new Error('OneDrive gaf fout ' + r.status);
+        return r.json().then(function (j) { return (j.value || []).filter(function (f) { return f.file && /\.(zip|json)$/i.test(f.name); }); });
+      });
+  }
+  function downloadRemote(f) {
+    return gfetch('/me/drive/items/' + encodeURIComponent(f.id) + '/content').then(function (r) {
+      if (!r.ok) throw new Error('Downloaden mislukt (' + r.status + ')');
+      return r.arrayBuffer();
+    });
+  }
+  function uploadRemote(file) {
+    var url = '/me/drive/root:/' + encPath(FOLDER + '/' + file.name) + ':/content?@microsoft.graph.conflictBehavior=rename';
+    return ensureFolder().then(function () {
+      return gfetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: file });
+    }).then(function (r) { if (!r.ok) throw new Error('Uploaden mislukt (' + r.status + ')'); });
+  }
+
+  var online = false;
+  function syncFromDrive() {
+    $('btnRefresh').disabled = true;
+    setStatus('Bezig met OneDrive › Claudemmer › Sport…');
+    return listRemote().then(function (files) {
+      online = true;
+      var todo = files.filter(function (f) { var s = DATA.files[f.id]; return !s || s.eTag !== f.eTag; });
+      var chain = Promise.resolve(0);
+      todo.forEach(function (f) {
+        chain = chain.then(function (sum) {
+          return downloadRemote(f).then(function (buf) { return ingestFile(f.name, buf); }).then(function (n) {
+            DATA.files[f.id] = { name: f.name, eTag: f.eTag, size: f.size, at: f.lastModifiedDateTime };
+            return sum + n;
+          }, function (e) { setMsg(f.name + ': ' + e.message, true); return sum; });
+        });
+      });
+      return chain.then(function (added) {
+        DATA.remoteCount = files.length;
+        save();
+        if (todo.length) setMsg(todo.length + ' bestand(en) gelezen, ' + added + ' nieuwe regels.');
+        render();
+      });
+    }).then(null, function (e) {
+      if (e.auth) { online = false; $('btnLogin').classList.remove('hidden'); }
+      else setMsg('OneDrive niet bereikbaar: ' + e.message + '. Je ziet de laatst bewaarde gegevens.', true);
+    }).then(function () { $('btnRefresh').disabled = false; setStatus(); });
+  }
+
+  function setStatus(text) {
+    var s = $('status');
+    if (text) { s.textContent = text; return; }
+    s.textContent = '';
+    var n = Object.keys(DATA.files).length;
+    if (online) {
+      h('b', null, 'OneDrive › Claudemmer › Sport', s);
+      s.appendChild(document.createTextNode(' · ' + (DATA.remoteCount || 0) + ' export(s)'));
+      $('btnRefresh').classList.remove('hidden');
+      $('btnLogin').classList.add('hidden');
+    } else {
+      s.appendChild(document.createTextNode(n ? 'Laatst bewaarde gegevens op dit toestel. ' : ''));
+      h('b', null, 'Niet ingelogd bij OneDrive', s);
+      s.appendChild(document.createTextNode(' — log in via de Verzamelbak (sync-knop) en kom terug.'));
+    }
+  }
+
+  $('btnRefresh').addEventListener('click', syncFromDrive);
+  $('fileIn').addEventListener('change', function (e) {
+    var files = Array.prototype.slice.call(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    setMsg('Bezig met inlezen…');
+    var chain = Promise.resolve(0);
+    files.forEach(function (f) {
+      chain = chain.then(function (sum) {
+        return f.arrayBuffer().then(function (buf) { return ingestFile(f.name, buf); }).then(function (n) { return sum + n; });
+      });
+    });
+    chain.then(function (added) {
+      save(); render();
+      setMsg(added + ' nieuwe regels toegevoegd.' + (online ? ' Bezig met opslaan in OneDrive…' : ' Alleen op dit toestel bewaard; log in om het ook in OneDrive te zetten.'));
+      if (!online) return;
+      return Promise.all(files.map(uploadRemote)).then(function () {
+        setMsg(added + ' nieuwe regels toegevoegd en in OneDrive › Claudemmer › Sport gezet.');
+        return syncFromDrive();
+      });
+    }).then(null, function (err) { setMsg('Er ging iets mis: ' + err.message, true); });
+  });
+
+  /* ===================================================================
+     5. Afgeleide reeksen
+     =================================================================== */
+  function series() {
+    var bio = {}, B = DATA.bio;
+    Object.keys(B).forEach(function (k) {
+      var r = B[k]; (bio[r.n] = bio[r.n] || {}); (bio[r.n][r.d] = bio[r.n][r.d] || []).push(r.v);
+    });
+    var metric = {};
+    Object.keys(bio).forEach(function (n) {
+      metric[n] = Object.keys(bio[n]).sort().map(function (d) {
+        var vs = bio[n][d];
+        var avg = vs.reduce(function (a, b) { return a + b; }, 0) / vs.length;
+        return { t: Date.parse(d + 'T12:00:00'), d: d, v: avg, max: Math.max.apply(null, vs) };
+      });
+    });
+    Object.keys(metric).forEach(function (n) {           // lopende mediaan (5)
+      var a = metric[n];
+      a.forEach(function (p, i) {
+        var w = a.slice(Math.max(0, i - 2), Math.min(a.length, i + 3)).map(function (q) { return q.v; });
+        p.trend = median(w);
+      });
+    });
+    var ind = Object.keys(DATA.ind).map(function (k) { return DATA.ind[k]; }).sort(function (a, b) { return a.t - b.t; });
+    var out = Object.keys(DATA.out).map(function (k) { return DATA.out[k]; }).sort(function (a, b) { return a.t - b.t; });
+    var gymDays = {};
+    ind.forEach(function (x) { var k = dayKey(x.t); (gymDays[k] = gymDays[k] || []).push(x); });
+    var gymDayList = Object.keys(gymDays).sort().map(function (k) { return Date.parse(k + 'T12:00:00'); });
+
+    // weken
+    var all = ind.map(function (x) { return x.t; }).concat(out.map(function (x) { return x.t; }));
+    Object.keys(metric).forEach(function (n) { metric[n].forEach(function (p) { all.push(p.t); }); });
+    var tMin = all.length ? Math.min.apply(null, all) : Date.now(), tMax = all.length ? Math.max.apply(null, all) : Date.now();
+    var weeks = [], wmap = {};
+    for (var w = weekStart(tMin); w <= tMax; w = weekStart(w + 8 * DAY)) {
+      var o = { t: w, kracht: 0, cardio: 0, buiten: 0, days: {}, mv: 0 };
+      weeks.push(o); wmap[w] = o;
+    }
+    ind.forEach(function (x) {
+      var o = wmap[weekStart(x.t)]; if (!o) return;
+      o[x.c === 'kracht' ? 'kracht' : x.c === 'cardio' ? 'cardio' : 'buiten'] += x.dur / 60;
+      o.days[dayKey(x.t)] = 1; o.mv += x.mv;
+    });
+    out.forEach(function (x) {
+      var o = wmap[weekStart(x.t)]; if (!o) return;
+      o.buiten += x.dur / 60; o.mv += x.mv;
+    });
+    var wt = metric['Weight'] || [];
+    weeks.forEach(function (o) {
+      o.n = Object.keys(o.days).length;
+      o.total = o.kracht + o.cardio + o.buiten;
+      var inW = wt.filter(function (p) { return p.t >= o.t && p.t < o.t + 7 * DAY; });
+      o.weight = inW.length ? inW[inW.length - 1].v : null;
+    });
+
+    // pauzes in de sportschool (≥ 21 dagen zonder training)
+    var pauses = [];
+    for (var i = 1; i < gymDayList.length; i++) {
+      var gap = Math.round((gymDayList[i] - gymDayList[i - 1]) / DAY);
+      if (gap >= 21) pauses.push({ a: gymDayList[i - 1], b: gymDayList[i], days: gap });
+    }
+    if (gymDayList.length) {
+      var since = Math.round((dayStart(Date.now()) - dayStart(gymDayList[gymDayList.length - 1])) / DAY);
+      if (since >= 21) pauses.push({ a: gymDayList[gymDayList.length - 1], b: Date.now(), days: since, open: true });
+    }
+    return { metric: metric, ind: ind, out: out, gymDays: gymDays, gymDayList: gymDayList, weeks: weeks, pauses: pauses, tMin: tMin, tMax: tMax };
+  }
+
+  /* ===================================================================
+     6. Opvallende dingen (regels in gewone taal)
+     =================================================================== */
+  var NL_TEST = {
+    'Leg Press': 'Beenpers', 'Chest Press': 'Borstpers', 'Low Row': 'Roeien (low row)', 'Vertical Traction': 'Lat pulldown',
+    'Leg Extension': 'Beenstrekken', 'Leg Curl': 'Beenbuigen', 'Shoulder Press': 'Schouderpers', 'Abdominal Crunch': 'Buikspieren',
+    'Lower Back': 'Onderrug', 'Adductor': 'Adductoren', 'Abductor': 'Abductoren', 'Legs': 'Benen', 'Back': 'Rug', 'Pectorals': 'Borst'
+  };
+  function strengthTests(S) {
+    var names = Object.keys(S.metric).filter(function (n) { return /^1RM /.test(n); });
+    var bio = names.filter(function (n) { return /Biostrength/i.test(n); });
+    var use = bio.length ? bio : names;
+    return use.map(function (n) {
+      var raw = n.replace(/^1RM /, '').replace(/ Biostrength/i, '').trim();
+      var pts = S.metric[n];
+      var first = pts[0], best = pts.reduce(function (a, p) { return p.max >= a.max ? p : a; }, pts[0]);
+      var last = pts[pts.length - 1];
+      return { key: n, name: NL_TEST[raw] || raw, first: first.max, firstT: first.t, best: best.max, bestT: best.t, last: last.max, lastT: last.t, n: pts.length };
+    }).filter(function (s) { return s.n >= 2; }).sort(function (a, b) { return (b.best / b.first) - (a.best / a.first); });
+  }
+  function avgAround(arr, t, side, n) {   // mediaan van n metingen vóór (side -1) of na (side 1) t
+    var pick = side < 0 ? arr.filter(function (p) { return p.t <= t; }).slice(-n) : arr.filter(function (p) { return p.t >= t; }).slice(0, n);
+    return pick.length ? median(pick.map(function (p) { return p.v; })) : null;
+  }
+  function insights(S) {
+    var L = [], M = S.metric, W = M['Weight'] || [], F = M['Fat mass Perc'] || [], MM = M['Muscle Mass'] || [];
+
+    // gewicht over de hele periode
+    if (W.length >= 4) {
+      var a = W[0].trend, b = W[W.length - 1].trend, d = b - a;
+      L.push({ t: W[W.length - 1].t, title: 'Gewicht ' + signed(d) + ' kg sinds ' + MAAND_LANG[new Date(W[0].t).getMonth()] + ' ' + new Date(W[0].t).getFullYear(),
+        text: 'De trendlijn ging van ' + fmt(a) + ' naar ' + fmt(b) + ' kg. ' + (Math.abs(d) < 1
+          ? 'Dat is binnen de gewone schommeling van een dag of twee (vocht, eten).'
+          : d < 0 ? 'Rustig en gelijkmatig afvallen is beter vol te houden dan snel; dit tempo is prima.' : 'Kijk ook naar spiermassa: een deel kan spier zijn.') });
+    }
+
+    // pauzes
+    S.pauses.forEach(function (p) {
+      var wk = Math.round(p.days / 7);
+      var outN = S.out.filter(function (x) { return x.t > p.a && x.t < p.b; });
+      var kinds = {};
+      outN.forEach(function (x) { var k = /ride|fiets/i.test(x.nm) ? 'fietsen' : /walk|lopen/i.test(x.nm) ? 'wandelen/lopen' : /swim|zwem/i.test(x.nm) ? 'zwemmen' : 'overig'; kinds[k] = (kinds[k] || 0) + 1; });
+      var top = Object.keys(kinds).sort(function (x, y) { return kinds[y] - kinds[x]; })[0];
+      var txt = (p.open ? 'Sinds ' + dLang(p.a) + ' ben je ' + wk + ' weken niet in de sportschool geweest. ' : 'Tussen ' + dLang(p.a) + ' en ' + dLang(p.b) + ' was je ' + wk + ' weken niet in de sportschool. ');
+      if (outN.length) txt += 'Je deed in die tijd wel ' + outN.length + ' activiteit' + (outN.length === 1 ? '' : 'en') + ' daarbuiten, vooral ' + top + '. ';
+      if (!p.open) {
+        var w0 = avgAround(W, p.a, -1, 3), w1 = avgAround(W, p.b, 1, 3);
+        var m0 = avgAround(MM, p.a, -1, 3), m1 = avgAround(MM, p.b, 1, 3);
+        if (w0 != null && w1 != null) txt += 'Gewicht ervoor ' + fmt(w0) + ', erna ' + fmt(w1) + ' kg' + (m0 != null && m1 != null ? '; spiermassa ' + fmt(m0) + ' → ' + fmt(m1) + ' kg' : '') + '. ';
+        if (m0 != null && m1 != null && m1 < m0 - 0.5) txt += 'Spier gaat bij minder krachttraining het eerst terug, maar komt bij hervatten ook sneller terug dan de eerste keer (spiergeheugen).';
+      }
+      L.push({ t: p.open ? p.a + (p.b - p.a) / 2 : p.a + (p.b - p.a) / 2, title: (p.open ? 'Al ' : '') + wk + ' weken pauze', text: txt.trim() });
+    });
+
+    // kracht
+    var st = strengthTests(S);
+    if (st.length) {
+      var s0 = st[0], pct = Math.round((s0.best / s0.first - 1) * 100);
+      var others = st.slice(1, 3).map(function (s) { return s.name.toLowerCase() + ' ' + signed(Math.round((s.best / s.first - 1) * 100), 0) + '%'; });
+      L.push({ t: s0.bestT, title: s0.name + ': ' + fmt(s0.first) + ' → ' + fmt(s0.best) + ' kg (' + signed(pct, 0) + '%)',
+        text: 'Je grootste krachtwinst' + (others.length ? ' (verder: ' + others.join(', ') + ')' : '') + '. Een deel van zo’n sprong komt doordat je de beweging in het begin nog leert: je zenuwstelsel stuurt de spier beter aan. Daarna groeit vooral de spier zelf.' });
+    }
+
+    // grootste sprong vetpercentage binnen een week
+    var jump = null;
+    for (var i = 1; i < F.length; i++) {
+      var dd = (F[i].t - F[i - 1].t) / DAY, dv = F[i].v - F[i - 1].v;
+      if (dd <= 7 && (!jump || Math.abs(dv) > Math.abs(jump.dv))) jump = { a: F[i - 1], b: F[i], dv: dv, dd: Math.round(dd) };
+    }
+    if (jump && Math.abs(jump.dv) >= 1.5) {
+      L.push({ t: jump.b.t, title: 'Vetpercentage sprong ' + signed(jump.dv) + ' punt in ' + jump.dd + ' dag' + (jump.dd === 1 ? '' : 'en'),
+        text: 'Van ' + fmt(jump.a.v) + ' naar ' + fmt(jump.b.v) + '%. Zoveel vet win of verlies je niet in een paar dagen. De weegschaal meet via stroom, en die gaat makkelijker door vocht. Meer of minder drinken, net gegeten of net getraind geeft zulke sprongen. Meet daarom liefst steeds op hetzelfde moment, vóór het trainen.' });
+    }
+
+    // recente dip spiermassa
+    if (MM.length >= 8) {
+      var last3 = median(MM.slice(-3).map(function (p) { return p.v; })), prev = median(MM.slice(-8, -3).map(function (p) { return p.v; }));
+      if (last3 < prev - 1) L.push({ t: MM[MM.length - 1].t, title: 'Spiermassa laatste metingen ' + signed(last3 - prev) + ' kg',
+        text: 'Je laatste drie metingen liggen rond ' + fmt(last3) + ' kg, daarvoor rond ' + fmt(prev) + '. Dat kan echt zijn (minder getraind), maar ook vocht. Houd het een paar weken in de gaten voordat je conclusies trekt.' });
+    }
+
+    // drukste maand
+    var months = {};
+    S.gymDayList.forEach(function (t) { var d = new Date(t); var k = d.getFullYear() * 12 + d.getMonth(); months[k] = (months[k] || 0) + 1; });
+    var mk = Object.keys(months).sort(function (a, b) { return months[b] - months[a]; })[0];
+    if (mk != null && months[mk] >= 4) {
+      var y = Math.floor(mk / 12), m = mk % 12;
+      var avg = S.gymDayList.length / Math.max(1, Object.keys(months).length);
+      L.push({ t: new Date(y, m, 15).getTime(), title: 'Drukste maand: ' + MAAND_LANG[m] + ' ' + y,
+        text: months[mk] + ' keer naar de sportschool, tegen gemiddeld ' + fmt(avg) + ' keer in de maanden dat je ging. Twee à drie keer per week is ongeveer waar krachttraining het meeste oplevert.' });
+    }
+
+    L.sort(function (a, b) { return a.t - b.t; });
+    L.forEach(function (x, i) { x.nr = i + 1; });
+
+    // zonder datum (geen rondje op de tijdlijn)
+    var free = [];
+    if (S.gymDayList.length >= 8) {
+      var wd = [0, 0, 0, 0, 0, 0, 0], hrs = {};
+      S.gymDayList.forEach(function (t) { wd[(new Date(t).getDay() + 6) % 7]++; });
+      S.ind.forEach(function (x) { var hh = new Date(x.t).getHours(); hrs[hh] = (hrs[hh] || 0) + 1; });
+      var bi = wd.indexOf(Math.max.apply(null, wd)), bh = +Object.keys(hrs).sort(function (a, b) { return hrs[b] - hrs[a]; })[0];
+      var dur = median(Object.keys(S.gymDays).map(function (k) { return S.gymDays[k].reduce(function (a, x) { return a + x.dur; }, 0) / 60; }));
+      free.push({ title: 'Vaste gewoonte: ' + DAGEN[bi] + ' rond ' + bh + ' uur',
+        text: 'Op ' + DAGEN[bi] + ' ging je ' + wd[bi] + ' van de ' + S.gymDayList.length + ' keer. Een sportschoolbezoek duurt bij jou meestal zo’n ' + Math.round(dur) + ' minuten aan apparaten. Een vast moment is de beste voorspeller dat je het volhoudt.' });
+    }
+    var MA = M['Metabolic Age'] || [];
+    if (DATA.birth && MA.length >= 3) {
+      var bd = new Date(DATA.birth + 'T12:00:00'), now = new Date(MA[MA.length - 1].t);
+      var age = now.getFullYear() - bd.getFullYear() - ((now.getMonth() < bd.getMonth() || (now.getMonth() === bd.getMonth() && now.getDate() < bd.getDate())) ? 1 : 0);
+      var ma = MA[MA.length - 1].trend, diff = Math.round(age - ma);
+      if (Math.abs(diff) >= 2) free.push({ title: 'Metabole leeftijd ' + (diff > 0 ? diff + ' jaar jonger' : -diff + ' jaar ouder') + ' dan je echte leeftijd',
+        text: 'De weegschaal schat je stofwisseling op die van iemand van ' + Math.round(ma) + ' (trend); je bent ' + age + '. Het is een schatting uit gewicht, vet en spier, dus vooral de richting over tijd zegt iets.' });
+    }
+    return { dated: L, free: free };
+  }
+
+  /* ===================================================================
+     7. Tekenen
+     =================================================================== */
+  var range = 0, S = null, INS = null;
+
+  function render() {
+    S = series();
+    var has = S.ind.length || S.out.length || Object.keys(S.metric).length;
+    $('emptyState').classList.toggle('hidden', !!has);
+    $('dash').classList.toggle('hidden', !has);
+    if (!has) return;
+    INS = insights(S);
+    $('subtitle').textContent = 'John Visser · Technogym · ' + dKort(S.tMin) + ' – ' + dKort(S.tMax);
+    drawKpis(); drawTimeline(); drawInsights(); drawBody(); drawStrength(); drawWeekday(); drawTable();
+    var f = $('foot'); f.textContent = '';
+    f.textContent = S.ind.length + ' oefeningen op apparaten, ' + S.out.length + ' activiteiten daarbuiten, ' + Object.keys(DATA.bio).length +
+      ' meetwaarden. Bewaard op dit toestel' + (DATA.saved ? ' (' + dKort(DATA.saved) + ')' : '') + '.';
+    var clr = h('button', null, 'Wis gegevens op dit toestel', null);
+    clr.type = 'button'; clr.style.marginLeft = '10px'; clr.style.minHeight = '32px'; clr.style.fontSize = '12px';
+    clr.addEventListener('click', function () {
+      if (clr.dataset.sure) { DATA = emptyData(); lsSet(DATA_KEY, null); render(); if (online) syncFromDrive(); }
+      else { clr.dataset.sure = '1'; clr.textContent = 'Zeker weten? Tik nog eens'; }
+    });
+    f.appendChild(clr);
+  }
+
+  function drawKpis() {
+    var k = $('kpis'); k.textContent = '';
+    function tile(lbl, val, unit, chg, goodWhenDown) {
+      var c = h('div', 'card kpi', null, k);
+      h('div', 'lbl', lbl, c);
+      var v = h('div', 'val num', val, c); if (unit) h('small', null, unit, v);
+      if (chg) {
+        var cc = h('div', 'chg', null, c);
+        if (chg.d != null) {
+          var cls = Math.abs(chg.d) < chg.eps ? '' : ((chg.d < 0) === goodWhenDown ? 'good' : 'bad');
+          h('span', cls, signed(chg.d, chg.dec), cc);
+          cc.appendChild(document.createTextNode(' ' + chg.txt));
+        } else cc.textContent = chg.txt;
+      }
+    }
+    function m(name, label, unit, dec, goodDown, eps) {
+      var a = S.metric[name]; if (!a || !a.length) return;
+      var last = a[a.length - 1];
+      tile(label, fmt(last.trend, dec), unit, a.length > 1 ? { d: last.trend - a[0].trend, dec: dec, eps: eps, txt: 'sinds ' + MAAND[new Date(a[0].t).getMonth()] + ' ' + String(new Date(a[0].t).getFullYear()).slice(2) } : null, goodDown);
+    }
+    m('Weight', 'Gewicht (trend)', 'kg', 1, true, 0.3);
+    m('Fat mass Perc', 'Vetpercentage', '%', 1, true, 0.3);
+    m('Muscle Mass', 'Spiermassa', 'kg', 1, false, 0.3);
+    m('Visceral Fat Rating', 'Buikvet (visceraal)', '', 0, true, 0.5);
+    var yr = new Date().getFullYear();
+    var thisYear = S.gymDayList.filter(function (t) { return new Date(t).getFullYear() === yr; }).length;
+    tile('Sportschoolbezoeken', fmt(S.gymDayList.length, 0), '', { txt: thisYear + ' in ' + yr });
+    var mv = S.ind.reduce(function (a, x) { return a + x.mv; }, 0) + S.out.reduce(function (a, x) { return a + x.mv; }, 0);
+    tile('MOVEs totaal', fmt(mv, 0), '', { txt: 'Technogym-beweegpunten' });
+  }
+
+  // tooltip helper
+  function tipFor(box) {
+    var t = box.querySelector('.tip'); if (!t) { t = h('div', 'tip', null, box); }
+    return {
+      show: function (x, y, build) {
+        t.textContent = ''; build(t); t.style.display = 'block';
+        var bw = box.clientWidth, tw = t.offsetWidth, th = t.offsetHeight;
+        var left = x + 14; if (left + tw > bw) left = x - tw - 14; if (left < 0) left = Math.max(0, Math.min(bw - tw, x - tw / 2));
+        var top = y - th - 10; if (top < 0) top = y + 14;
+        t.style.left = left + 'px'; t.style.top = top + 'px';
+      },
+      hide: function () { t.style.display = 'none'; }
+    };
+  }
+  function tipRow(t, label, value, color) {
+    var r = h('div', 'r', null, t), a = h('span', null, null, r);
+    if (color) { var s = h('i', 'sw', null, a); s.style.background = color; }
+    a.appendChild(document.createTextNode(label)); h('span', 'num', value, r);
+  }
+  function niceTicks(lo, hi, n) {
+    var span = hi - lo || 1, step = Math.pow(10, Math.floor(Math.log10(span / n))), err = span / n / step;
+    step *= err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1;
+    var out = []; for (var v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) out.push(+v.toFixed(6));
+    return out;
+  }
+  function monthTicks(t0, t1, width) {
+    var d = new Date(t0); d.setDate(1); d.setHours(0, 0, 0, 0); if (d.getTime() < t0) d.setMonth(d.getMonth() + 1);
+    var all = []; while (d.getTime() <= t1) { all.push(d.getTime()); d.setMonth(d.getMonth() + 1); }
+    var every = Math.max(1, Math.ceil(all.length / Math.max(2, Math.floor(width / 62))));
+    return all.filter(function (t, i) { var m = new Date(t).getMonth(); return every === 1 || m % every === 0; });
+  }
+  // Trendlijn die bij een lange pauze overgaat in een stippellijn
+  function trendLine(parent, pts, xf, yf, color) {
+    var solid = '', dash = '';
+    pts.forEach(function (p, i) {
+      var X = xf(p.t).toFixed(1), Y = yf(p.trend).toFixed(1);
+      if (!i) { solid += 'M' + X + ',' + Y; return; }
+      var q = pts[i - 1], QX = xf(q.t).toFixed(1), QY = yf(q.trend).toFixed(1);
+      if ((p.t - q.t) / DAY > 45) { dash += 'M' + QX + ',' + QY + 'L' + X + ',' + Y; solid += 'M' + X + ',' + Y; }
+      else solid += 'L' + X + ',' + Y;
+    });
+    el('path', { d: solid, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, parent);
+    if (dash) el('path', { d: dash, fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-dasharray': '2 5', 'stroke-linecap': 'round', opacity: .6 }, parent);
+  }
+  function mLabel(t, withYear) { var d = new Date(t); return MAAND[d.getMonth()] + (withYear || d.getMonth() === 0 ? ' ’' + String(d.getFullYear()).slice(2) : ''); }
+
+  function drawTimeline() {
+    var box = $('timeline'); box.textContent = '';
+    var W = Math.max(300, box.clientWidth), narrow = W < 520;
+    var padL = 40, padR = 10, top = 26, laneW = 110, gap = 30, laneB = 120, axisH = 22;
+    var H = top + laneW + gap + laneB + axisH;
+    var t1 = S.tMax + 4 * DAY, t0 = range ? Math.max(S.tMin - 4 * DAY, t1 - range * DAY) : S.tMin - 4 * DAY;
+    var x = function (t) { return padL + (t - t0) / (t1 - t0) * (W - padL - padR); };
+    var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': 'Tijdlijn van gewicht en training per week' }, box);
+    var defs = el('defs', {}, svg), clip = el('clipPath', { id: 'tlclip' }, defs);
+    el('rect', { x: padL, y: 0, width: W - padL - padR, height: H }, clip);
+    var g = el('g', { 'clip-path': 'url(#tlclip)' }, svg);
+
+    // lanes
+    var yA0 = top, yA1 = top + laneW, yB0 = yA1 + gap, yB1 = yB0 + laneB;
+    var wts = (S.metric['Weight'] || []).filter(function (p) { return p.t >= t0 - 30 * DAY && p.t <= t1; });
+    var wVis = wts.filter(function (p) { return p.t >= t0; });
+    var wv = (wVis.length ? wVis : wts).map(function (p) { return p.v; });
+    var wLo = wv.length ? Math.min.apply(null, wv) : 0, wHi = wv.length ? Math.max.apply(null, wv) : 1;
+    var wPad = Math.max(0.6, (wHi - wLo) * 0.15); wLo -= wPad; wHi += wPad;
+    var yW = function (v) { return yA1 - (v - wLo) / (wHi - wLo) * (yA1 - yA0); };
+    var wk = S.weeks.filter(function (o) { return o.t + 7 * DAY >= t0 && o.t <= t1; });
+    var mHi = Math.max(60, Math.max.apply(null, wk.map(function (o) { return o.total; }).concat([0])));
+    var mt = niceTicks(0, mHi, 3); mHi = Math.max(mHi, mt[mt.length - 1]);
+    var yM = function (v) { return yB1 - v / mHi * (yB1 - yB0); };
+
+    // pauzes
+    S.pauses.forEach(function (p) {
+      var xa = x(p.a + DAY), xb = x(p.b - (p.open ? 0 : DAY));
+      if (xb < padL || xa > W) return;
+      el('rect', { x: xa, y: yA0 - 4, width: Math.max(0, xb - xa), height: yB1 - yA0 + 4, fill: css('--pause'), rx: 6 }, g);
+      if (xb - xa > 70) {
+        var tx = el('text', { x: (xa + xb) / 2, y: yB0 - 9, 'text-anchor': 'middle', class: 'lane-lbl', style: 'font-weight:400' }, g);
+        tx.textContent = 'pauze · ' + Math.round(p.days / 7) + ' wk';
+      }
+    });
+
+    // rasters en aslabels (onder de staven)
+    var ax = el('g', { class: 'axis' }); svg.insertBefore(ax, g);
+    niceTicks(wLo, wHi, 3).forEach(function (v) {
+      el('line', { x1: padL, x2: W - padR, y1: yW(v), y2: yW(v), stroke: css('--grid') }, ax);
+      el('text', { x: padL - 6, y: yW(v) + 4, 'text-anchor': 'end' }, ax).textContent = fmt(v, 0);
+    });
+    mt.forEach(function (v) {
+      el('line', { x1: padL, x2: W - padR, y1: yM(v), y2: yM(v), stroke: v === 0 ? css('--line') : css('--grid') }, ax);
+      if (v) el('text', { x: padL - 6, y: yM(v) + 4, 'text-anchor': 'end' }, ax).textContent = fmt(v, 0);
+    });
+    el('text', { x: padL, y: yA0 - 12, class: 'lane-lbl' }, svg).textContent = 'Gewicht (kg)';
+    el('text', { x: padL, y: yB0 - 9, class: 'lane-lbl' }, svg).textContent = 'Minuten per week';
+    var ticks = monthTicks(t0, t1, W - padL - padR);
+    ticks.forEach(function (t, i) {
+      el('line', { x1: x(t), x2: x(t), y1: yB1, y2: yB1 + 4, stroke: css('--line') }, ax);
+      el('text', { x: x(t), y: yB1 + 17, 'text-anchor': 'middle' }, ax).textContent = mLabel(t, i === 0);
+    });
+
+    // weekstaven (gestapeld, 2px tussenruimte)
+    var cols = [['kracht', css('--s1')], ['cardio', css('--s2')], ['buiten', css('--s3')]];
+    var bw = Math.max(2, x(t0 + 7 * DAY) - x(t0) - 2);
+    wk.forEach(function (o) {
+      var yy = yB1, segs = cols.filter(function (c) { return o[c[0]] > 0.5; });
+      segs.forEach(function (c, i) {
+        var hgt = o[c[0]] / mHi * (yB1 - yB0), isTop = i === segs.length - 1;
+        var y0 = yy - hgt + (i ? 0 : 0), hh = Math.max(1, hgt - (i ? 2 : 0));
+        var r = Math.min(3, bw / 2, hh / 2);
+        var xx = x(o.t) + 1;
+        if (isTop && hh > 2) {
+          el('path', { d: 'M' + xx + ',' + (yy - (i ? 2 : 0)) + 'v' + (-(hh - r)) + 'q0,' + (-r) + ' ' + r + ',' + (-r) + 'h' + (bw - 2 * r) + 'q' + r + ',0 ' + r + ',' + r + 'v' + (hh - r) + 'z', fill: c[1] }, g);
+        } else el('rect', { x: xx, y: yy - (i ? 2 : 0) - hh, width: bw, height: hh, fill: c[1] }, g);
+        yy -= hgt;
+      });
+    });
+
+    // gewicht: puntjes + trendlijn
+    wts.forEach(function (p) { el('circle', { cx: x(p.t), cy: yW(p.v), r: 2.6, fill: css('--dot') }, g); });
+    if (wts.length > 1) {
+      trendLine(g, wts, x, yW, css('--trend'));
+      var lp = wts[wts.length - 1];
+      el('text', { x: Math.min(x(lp.t) - 4, W - padR - 4), y: yW(lp.trend) - 8, 'text-anchor': 'end', style: 'font-size:12px;font-weight:700;fill:' + css('--ink') }, g).textContent = fmt(lp.trend) + ' kg';
+    }
+
+    // crosshair + tooltip
+    var cross = el('line', { y1: yA0 - 4, y2: yB1, stroke: css('--ink-soft'), 'stroke-dasharray': '3 3', visibility: 'hidden' }, svg);
+    var tip = tipFor(box);
+    var hit = el('rect', { x: padL, y: yA0 - 6, width: W - padL - padR, height: yB1 - yA0 + 6, fill: 'transparent' }, svg);
+    function move(ev) {
+      var rect = svg.getBoundingClientRect(), px = (ev.clientX - rect.left) * (W / rect.width);
+      var t = t0 + (px - padL) / (W - padL - padR) * (t1 - t0);
+      var o = S.weeks.filter(function (w) { return t >= w.t && t < w.t + 7 * DAY; })[0];
+      if (!o) { tip.hide(); cross.setAttribute('visibility', 'hidden'); return; }
+      var cx = x(o.t) + bw / 2 + 1;
+      cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.setAttribute('visibility', 'visible');
+      tip.show(cx * rect.width / W, (ev.clientY - rect.top), function (el2) {
+        h('div', 't', 'Week van ' + dKort(o.t), el2);
+        var inP = S.pauses.filter(function (p) { return o.t + 7 * DAY > p.a && o.t < p.b; })[0];
+        if (!o.total && inP) h('div', null, 'Pauze in de sportschool', el2);
+        if (o.kracht > 0.5) tipRow(el2, 'Kracht', Math.round(o.kracht) + ' min', cols[0][1]);
+        if (o.cardio > 0.5) tipRow(el2, 'Cardio binnen', Math.round(o.cardio) + ' min', cols[1][1]);
+        if (o.buiten > 0.5) tipRow(el2, 'Buiten / overig', Math.round(o.buiten) + ' min', cols[2][1]);
+        if (o.n) tipRow(el2, 'Sportschooldagen', String(o.n));
+        if (o.weight != null) tipRow(el2, 'Gewicht', fmt(o.weight) + ' kg');
+        if (!o.total && o.weight == null && !inP) h('div', null, 'Geen training of meting', el2);
+      });
+    }
+    hit.addEventListener('pointermove', move);
+    hit.addEventListener('pointerdown', move);
+    hit.addEventListener('pointerleave', function () { tip.hide(); cross.setAttribute('visibility', 'hidden'); });
+
+    // genummerde rondjes
+    var vis = INS.dated.filter(function (it) { return it.t >= t0 && it.t <= t1; });
+    var pos = vis.map(function (it) { return Math.max(padL + 10, Math.min(W - padR - 10, x(it.t))); });
+    for (var i = 1; i < pos.length; i++) pos[i] = Math.max(pos[i], pos[i - 1] + 23);        // niet over elkaar
+    for (var j = pos.length - 1; j >= 0; j--) pos[j] = Math.min(pos[j], (j < pos.length - 1 ? pos[j + 1] - 23 : W - padR - 10));
+    vis.forEach(function (it, k) {
+      var mx = pos[k], tx = x(it.t) - mx;
+      var mg = el('g', { class: 'marker', transform: 'translate(' + mx + ',' + (yA0 - 2) + ')', tabindex: 0, role: 'button', 'aria-label': 'Opvallend ' + it.nr + ': ' + it.title }, svg);
+      el('path', { d: 'M0,9L' + tx + ',16V' + (yB1 - yA0 + 2), fill: 'none', stroke: css('--accent'), 'stroke-width': 1, 'stroke-dasharray': '2 3', opacity: .45 }, mg);
+      el('circle', { r: 10 }, mg); el('text', {}, mg).textContent = it.nr;
+      function go() {
+        var c = $('ins-' + it.nr); if (!c) return;
+        c.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        c.classList.add('flash'); setTimeout(function () { c.classList.remove('flash'); }, 1400);
+      }
+      mg.addEventListener('click', go);
+      mg.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    });
+  }
+
+  function drawInsights() {
+    var box = $('insights'); box.textContent = '';
+    function card(it, label, plain) {
+      var c = h('div', 'card ins', null, box); if (it.nr) c.id = 'ins-' + it.nr;
+      h('div', 'badge' + (plain ? ' plain' : ''), label, c);
+      var b = h('div', null, null, c); h('h3', null, it.title, b); h('p', null, it.text, b);
+    }
+    INS.dated.forEach(function (it) { card(it, String(it.nr)); });
+    INS.free.forEach(function (it) { card(it, '•', true); });
+    if (!INS.dated.length && !INS.free.length) h('p', 'sub', 'Nog te weinig gegevens om iets over te zeggen.', box);
+  }
+
+  function miniChart(box, pts, opts) {
+    var W = Math.max(260, box.clientWidth), H = 150, padL = 34, padR = 8, top = 10, bottom = 22;
+    var t0 = pts[0].t - 3 * DAY, t1 = pts[pts.length - 1].t + 3 * DAY;
+    var vs = pts.map(function (p) { return p.v; });
+    var lo = Math.min.apply(null, vs), hi = Math.max.apply(null, vs), pad = Math.max(opts.minPad || 0.5, (hi - lo) * 0.12);
+    lo -= pad; hi += pad;
+    var x = function (t) { return padL + (t - t0) / (t1 - t0) * (W - padL - padR); };
+    var y = function (v) { return top + (1 - (v - lo) / (hi - lo)) * (H - top - bottom); };
+    var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': opts.label }, box);
+    var ax = el('g', { class: 'axis' }, svg);
+    niceTicks(lo, hi, 3).forEach(function (v) {
+      el('line', { x1: padL, x2: W - padR, y1: y(v), y2: y(v), stroke: css('--grid') }, ax);
+      el('text', { x: padL - 5, y: y(v) + 4, 'text-anchor': 'end' }, ax).textContent = fmt(v, opts.tickDec || 0);
+    });
+    monthTicks(t0, t1, W - padL - padR).forEach(function (t, i) {
+      el('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }, ax).textContent = mLabel(t, i === 0);
+    });
+    S.pauses.forEach(function (p) {
+      var xa = Math.max(padL, x(p.a + DAY)), xb = Math.min(W - padR, x(p.b - DAY));
+      if (xb > xa) el('rect', { x: xa, y: top, width: xb - xa, height: H - top - bottom, fill: css('--pause'), rx: 4 }, svg);
+    });
+    pts.forEach(function (p) { el('circle', { cx: x(p.t), cy: y(p.v), r: 2.6, fill: css('--dot') }, svg); });
+    trendLine(svg, pts, x, y, css('--trend'));
+    var tip = tipFor(box), ring = el('circle', { r: 5, fill: 'none', stroke: css('--ink'), 'stroke-width': 1.5, visibility: 'hidden' }, svg);
+    var hit = el('rect', { x: padL, y: 0, width: W - padL - padR, height: H - bottom, fill: 'transparent' }, svg);
+    function move(ev) {
+      var rect = svg.getBoundingClientRect(), px = (ev.clientX - rect.left) * (W / rect.width);
+      var best = null; pts.forEach(function (p) { var d = Math.abs(x(p.t) - px); if (!best || d < best.d) best = { p: p, d: d }; });
+      if (!best || best.d > 30) { tip.hide(); ring.setAttribute('visibility', 'hidden'); return; }
+      var p = best.p; ring.setAttribute('cx', x(p.t)); ring.setAttribute('cy', y(p.v)); ring.setAttribute('visibility', 'visible');
+      tip.show(x(p.t) * rect.width / W, y(p.v) * rect.height / H, function (t) {
+        h('div', 't', dKort(p.t), t);
+        tipRow(t, 'Meting', fmt(p.v, opts.dec) + opts.unit);
+        tipRow(t, 'Trend', fmt(p.trend, opts.dec) + opts.unit);
+      });
+    }
+    hit.addEventListener('pointermove', move); hit.addEventListener('pointerdown', move);
+    hit.addEventListener('pointerleave', function () { tip.hide(); ring.setAttribute('visibility', 'hidden'); });
+  }
+
+  function drawBody() {
+    var box = $('body'); box.textContent = '';
+    var defs = [
+      ['Weight', 'Gewicht', ' kg', 1, 'Je totale gewicht.'],
+      ['Fat mass Perc', 'Vetpercentage', '%', 1, 'Aandeel vet in je lichaam.'],
+      ['Muscle Mass', 'Spiermassa', ' kg', 1, 'Spieren inclusief het vocht erin.'],
+      ['Visceral Fat Rating', 'Buikvet (visceraal)', '', 0, 'Vet rond de organen; 1–12 geldt als gezond.'],
+      ['Metabolic Age', 'Metabole leeftijd', ' jr', 0, 'Schatting van je stofwisseling.'],
+      ['Total Body Water Perc', 'Lichaamsvocht', '%', 1, 'Verklaart vaak de sprongen in vet en spier.']
+    ];
+    var todo = [];
+    defs.forEach(function (d) {
+      var pts = S.metric[d[0]]; if (!pts || pts.length < 2) return;
+      var c = h('div', 'card', null, box), hd = h('div', 'mini-h', null, c);
+      h('h3', null, d[1], hd);
+      var a = pts[0].trend, b = pts[pts.length - 1].trend;
+      h('span', 'now num', fmt(a, d[3]) + ' → ' + fmt(b, d[3]) + d[2], hd);
+      h('div', 'sub', d[4], c).style.margin = '0 0 4px';
+      var ch = h('div', 'chart', null, c);
+      todo.push([ch, pts, { label: d[1] + ' door de tijd', unit: d[2], dec: d[3], minPad: d[3] ? 0.5 : 1 }]);
+    });
+    todo.forEach(function (a) { miniChart(a[0], a[1], a[2]); });   // pas tekenen als het raster compleet is
+  }
+
+  function drawStrength() {
+    var box = $('strength'); box.textContent = '';
+    var st = strengthTests(S);
+    if (!st.length) { h('p', 'sub', 'Nog geen herhaalde krachttests in de gegevens.', box); return; }
+    var W = Math.max(300, box.clientWidth), narrow = W < 520, rowH = narrow ? 50 : 36, labW = narrow ? 0 : 150, padR = narrow ? 8 : 150;
+    var H = st.length * rowH + 24;
+    var hi = Math.max.apply(null, st.map(function (s) { return s.best; })) * 1.05;
+    var x = function (v) { return labW + v / hi * (W - labW - padR); };
+    var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': 'Kracht: eerste en beste test per apparaat' }, box);
+    var ax = el('g', { class: 'axis' }, svg);
+    niceTicks(0, hi, narrow ? 3 : 5).forEach(function (v) {
+      el('line', { x1: x(v), x2: x(v), y1: 0, y2: H - 20, stroke: css('--grid') }, ax);
+      el('text', { x: x(v), y: H - 6, 'text-anchor': 'middle' }, ax).textContent = fmt(v, 0) + (v ? ' kg' : '');
+    });
+    st.forEach(function (s, i) {
+      var cy = i * rowH + (narrow ? 34 : 18), pct = Math.round((s.best / s.first - 1) * 100);
+      var lab = el('text', { x: narrow ? x(0) : labW - 12, y: narrow ? cy - 15 : cy + 4, 'text-anchor': narrow ? 'start' : 'end', style: 'font-size:13px;fill:' + css('--ink') }, svg);
+      lab.textContent = s.name;
+      el('line', { x1: x(s.first), x2: x(s.best), y1: cy, y2: cy, stroke: css('--s1'), 'stroke-width': 3, 'stroke-linecap': 'round', opacity: .35 }, svg);
+      el('circle', { cx: x(s.first), cy: cy, r: 5.5, fill: css('--card'), stroke: css('--s1'), 'stroke-width': 2 }, svg);
+      el('circle', { cx: x(s.best), cy: cy, r: 6, fill: css('--s1'), stroke: css('--card'), 'stroke-width': 2 }, svg);
+      var vt = el('text', { x: narrow ? W - 8 : x(s.best) + 12, y: narrow ? cy - 15 : cy + 4, 'text-anchor': narrow ? 'end' : 'start', class: 'num', style: 'font-size:12.5px;fill:' + css('--ink-2') }, svg);
+      vt.textContent = fmt(s.first) + ' → ' + fmt(s.best) + ' kg  (' + signed(pct, 0) + '%)';
+      var tt = el('title', {}, lab); tt.textContent = s.name + ': eerste test ' + dKort(s.firstT) + ', beste ' + dKort(s.bestT);
+    });
+    var lg = h('div', 'legend', null, box); lg.style.marginTop = '6px';
+    var a = h('span', null, null, lg), sa = h('i', 'sw', null, a); sa.style.cssText = 'border:2px solid ' + css('--s1') + ';border-radius:50%;background:transparent'; a.appendChild(document.createTextNode('Eerste test'));
+    var b = h('span', null, null, lg), sb = h('i', 'sw', null, b); sb.style.cssText = 'background:' + css('--s1') + ';border-radius:50%'; b.appendChild(document.createTextNode('Beste test'));
+  }
+
+  function drawWeekday() {
+    var box = $('weekday'); box.textContent = '';
+    var wd = [0, 0, 0, 0, 0, 0, 0];
+    S.gymDayList.forEach(function (t) { wd[(new Date(t).getDay() + 6) % 7]++; });
+    var W = Math.max(280, box.clientWidth), H = 150, padB = 22, top = 18;
+    var hi = Math.max(1, Math.max.apply(null, wd)), bw = (W - 8) / 7;
+    var svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': 'Sportschoolbezoeken per weekdag' }, box);
+    var tip = tipFor(box);
+    wd.forEach(function (v, i) {
+      var hh = v / hi * (H - padB - top), xx = 4 + i * bw + bw * 0.18, w = bw * 0.64;
+      var r = Math.min(4, w / 2, hh / 2);
+      if (hh > 0) el('path', { d: 'M' + xx + ',' + (H - padB) + 'v' + (-(hh - r)) + 'q0,' + (-r) + ' ' + r + ',' + (-r) + 'h' + (w - 2 * r) + 'q' + r + ',0 ' + r + ',' + r + 'v' + (hh - r) + 'z', fill: css('--s1') }, svg);
+      el('text', { x: xx + w / 2, y: H - padB - hh - 5, 'text-anchor': 'middle', class: 'num', style: 'font-size:12px;fill:' + css('--ink-2') }, svg).textContent = v;
+      el('text', { x: xx + w / 2, y: H - 6, 'text-anchor': 'middle', class: 'axis', style: 'font-size:11px;fill:' + css('--ink-soft') }, svg).textContent = DAGEN[i].slice(0, 2);
+      var hit = el('rect', { x: 4 + i * bw, y: 0, width: bw, height: H, fill: 'transparent' }, svg);
+      function show(ev) {
+        var rect = svg.getBoundingClientRect();
+        tip.show((xx + w / 2) * rect.width / W, (H - padB - hh) * rect.height / H, function (t) {
+          h('div', 't', DAGEN[i], t); tipRow(t, 'Bezoeken', String(v));
+          tipRow(t, 'Aandeel', Math.round(v / Math.max(1, S.gymDayList.length) * 100) + '%');
+        });
+      }
+      hit.addEventListener('pointermove', show); hit.addEventListener('pointerdown', show);
+      hit.addEventListener('pointerleave', function () { tip.hide(); });
+    });
+    el('line', { x1: 0, x2: W, y1: H - padB, y2: H - padB, stroke: css('--line') }, svg);
+  }
+
+  function drawTable() {
+    var box = $('table'); box.textContent = '';
+    var cols = [['Weight', 'Gewicht', 1], ['Fat mass Perc', 'Vet %', 1], ['Muscle Mass', 'Spier kg', 1], ['Visceral Fat Rating', 'Buikvet', 0], ['Total Body Water Perc', 'Vocht %', 1], ['Metabolic Age', 'Met. leeftijd', 0]];
+    var days = {};
+    cols.forEach(function (c) { (S.metric[c[0]] || []).forEach(function (p) { (days[p.d] = days[p.d] || {})[c[0]] = p.v; }); });
+    var keys = Object.keys(days).sort().reverse();
+    if (!keys.length) { h('p', 'sub', 'Geen lichaamsmetingen.', box); return; }
+    var t = h('table', null, null, box), tr = h('tr', null, null, h('thead', null, null, t));
+    h('th', null, 'Datum', tr); cols.forEach(function (c) { h('th', null, c[1], tr); });
+    var tb = h('tbody', null, null, t);
+    keys.forEach(function (k) {
+      var r = h('tr', null, null, tb); h('td', null, dKort(Date.parse(k + 'T12:00:00')), r);
+      cols.forEach(function (c) { h('td', 'num', fmt(days[k][c[0]], c[2]), r); });
+    });
+  }
+
+  /* ===================================================================
+     8. Start
+     =================================================================== */
+  Array.prototype.forEach.call(document.querySelectorAll('.ranges button'), function (b) {
+    b.addEventListener('click', function () {
+      range = +b.dataset.r;
+      Array.prototype.forEach.call(document.querySelectorAll('.ranges button'), function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
+      if (S) drawTimeline();
+    });
+  });
+  var rT = null, lastW = window.innerWidth;
+  window.addEventListener('resize', function () {
+    if (Math.abs(window.innerWidth - lastW) < 20) return; lastW = window.innerWidth;
+    clearTimeout(rT); rT = setTimeout(function () { if (S) render(); }, 150);
+  });
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    (mq.addEventListener ? mq.addEventListener.bind(mq, 'change') : mq.addListener.bind(mq))(function () { if (S) render(); });
+  }
+
+  render();
+  setStatus();
+  if (tok && (tok.refresh || tok.access)) syncFromDrive();
+  else { $('btnLogin').classList.remove('hidden'); setStatus(); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "id": "./voortgang.html",
+  "name": "Voortgang",
+  "short_name": "Voortgang",
+  "description": "Voortgang in de sportschool: gewicht, lichaamssamenstelling en training.",
+  "start_url": "./voortgang.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4efe6",
+  "theme_color": "#f4efe6",
+  "icons": [
+    { "src": "voortgang-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "voortgang-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
