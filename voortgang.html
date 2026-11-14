@@ -245,7 +245,7 @@
   var AUTHORITY = 'https://login.microsoftonline.com/' + CFG.tenant + '/oauth2/v2.0';
   var GRAPH = 'https://graph.microsoft.com/v1.0';
   var TOK_KEY = 'verzamelbak.tok';  // gedeeld met de Verzamelbak (zelfde website)
-  var DATA_KEY = 'voortgang.data.v1';
+  var DATA_KEY = 'voortgang.data.v2';
   var KLED_KEY = 'voortgang.kleding';
   // Sportkleding weegt mee op de weegschaal. Standaard 1,5 kg; aan te passen onderaan de pagina.
   var KLEDING = (function () { var v = lsGet(KLED_KEY); return typeof v === 'number' && v >= 0 && v < 10 ? v : 1.5; })();
@@ -381,7 +381,8 @@
         } else if (x.performedData) {
           var p = prMap(x.performedData.pr), ti = parseDate(x.on);
           if (!isFinite(ti)) return;
-          var id = x.id || (ti + '|' + p.Duration + '|' + x.phId);
+          // sleutel op tijdstip + duur + apparaat: werkt ook tussen exports met andere id's
+          var id = ti + '|' + Math.round(num(p.Duration) || 0) + '|' + String(x.phId || '').slice(0, 8);
           if (DATA.ind[id]) return;
           DATA.ind[id] = {
             t: ti, ph: String(x.phId || '').slice(0, 8), c: classify(p),
@@ -392,7 +393,7 @@
         } else if (x.physicalActivityData) {
           var q = prMap(x.physicalActivityData.pr), to = parseDate(x.performedDate);
           if (!isFinite(to)) return;
-          var oid = x.id || (to + '|' + q.Duration + '|' + x.activityName);
+          var oid = to + '|' + Math.round(num(q.Duration) || 0) + '|' + String(x.activityName || '');
           if (DATA.out[oid]) return;
           DATA.out[oid] = {
             t: to, nm: String(x.activityName || 'Activiteit'), gps: !!x.gpsData,
