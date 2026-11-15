@@ -1308,9 +1308,20 @@
       var d = new Date(rows[i].t), lab = d.getDate() + ' ' + MAAND[d.getMonth()] + (j === 0 || j === picks.length - 1 ? ' ’' + String(d.getFullYear()).slice(2) : '');
       el('text', { x: x(i), y: H - 6, 'text-anchor': j === 0 && n > 1 ? 'start' : j === picks.length - 1 && n > 1 ? 'end' : 'middle' }, ax).textContent = lab;
     });
+    function xAt(t) {                                   // plek van een datum tussen de sessies
+      if (n === 1 || t <= rows[0].t) return x(0);
+      for (var j = 1; j < n; j++) if (t <= rows[j].t) return x(j - 1) + (x(j) - x(j - 1)) * (t - rows[j - 1].t) / (rows[j].t - rows[j - 1].t);
+      return x(n - 1);
+    }
     refs.forEach(function (r) {
+      if (r.t) {                                        // testdatum: verticaal stippellijntje
+        var xt = xAt(r.t);
+        el('line', { x1: xt, x2: xt, y1: y(r.v), y2: H - bottom, stroke: r.color, 'stroke-width': 1.2, 'stroke-dasharray': '2 3' }, svg);
+        el('circle', { cx: xt, cy: y(r.v), r: 3.5, fill: r.color }, svg);
+      }
       el('line', { x1: padL, x2: W - padR, y1: y(r.v), y2: y(r.v), stroke: r.color, 'stroke-width': 1.8, 'stroke-dasharray': '6 4' }, svg);
-      el('text', { x: W - padR - 2, y: y(r.v) + (r.below ? 13 : -4), 'text-anchor': 'end', style: 'font-size:11px;fill:' + r.color }, svg).textContent = r.short;
+      var left = r.t && xAt(r.t) > padL + plotW / 2;    // label weg van het testlijntje
+      el('text', { x: left ? padL + 4 : W - padR - 2, y: y(r.v) + (r.below ? 13 : -4), 'text-anchor': left ? 'start' : 'end', style: 'font-size:11px;fill:' + r.color }, svg).textContent = r.short;
     });
     defs.forEach(function (d, k) {
       var dd = rows.map(function (r, i) { return (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(r.v[k]).toFixed(1); }).join('');
@@ -1352,7 +1363,7 @@
         : [{ name: m.useRm1 ? 'Geschatte max' : 'Trainingsgewicht', color: c1 }];
       var refs = [];
       var tst = m.test ? lastTest(m.test) : null;
-      if (tst) refs.push({ name: 'Maxtest ' + dKort(tst.t) + (m.split ? ' (2 benen)' : ''), short: 'max ' + fmt(tst.v) + ' kg', v: tst.v, color: good });
+      if (tst) refs.push({ name: 'Maxtest ' + dKort(tst.t) + (m.split ? ' (2 benen)' : ''), short: 'max ' + fmt(tst.v) + ' kg · ' + dKort(tst.t), v: tst.v, t: tst.t, color: good });
       if (m.split && wNet) refs.push({ name: 'Norm 1 been (0,55× gewicht)', short: 'norm ' + fmt(0.55 * wNet, 0) + ' kg', v: 0.55 * wNet, color: soft, below: true });
       var last = rows[rows.length - 1].v;
       var c = h('div', 'card', null, box), hd = h('div', 'mini-h', null, c);
