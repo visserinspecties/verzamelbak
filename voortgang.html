@@ -219,7 +219,7 @@
     <h2>Per apparaat</h2>
     <p class="sub">Trainingsgewicht per sessie. Groen gestippeld: je laatste maxtest; grijs gestippeld: norm (alleen waar een betrouwbare norm bestaat).</p>
     <div class="multi" id="machines"></div>
-    <p class="note">De export zegt niet welk apparaat welk is; de namen zijn herleid uit de testdagen. Bij de beenpers zijn links en rechts teruggerekend uit het gemiddelde gewicht en de geschatte max van je sterkste been (links). Overal is het trainingsgewicht het gemiddelde over je sets; het gewicht van de zwaarste set staat niet in de export. Bij de crunch is dat gemiddelde berekend uit het totaal en het geschatte aantal herhalingen.</p>
+    <p class="note">De export zegt niet welk apparaat welk is; de namen zijn herleid uit de testdagen. Bij de beenpers zijn links en rechts teruggerekend uit het gemiddelde gewicht en de geschatte max van je sterkste been (links). Overal is het trainingsgewicht het gemiddelde over je sets; het gewicht van de zwaarste set staat niet in de export. Bij de crunch is dat gemiddelde berekend uit het totaal en het geschatte aantal herhalingen; sessies met gemengde of afgebroken sets zijn weggelaten.</p>
 
     <h2>Trainingsritme</h2>
     <p class="sub">Op welke dagen je naar de sportschool gaat.</p>
@@ -1268,7 +1268,10 @@
         // Geen gemiddeld gewicht in de export: herhalingen schatten uit totaal en Rm1 (≈ gemiddelde × 1,33 bij 10 herh.),
         // afgerond op hele rondes van 3 sets × 2 herh. (bv. 3×10 = 30, 3×12 = 36).
         var est = x.kg / (x.rm1 / 1.3337), reps = Math.max(6, 6 * Math.round(est / 6));
-        rows.push({ t: x.t, v: [x.kg / reps] }); return;
+        var av = x.kg / reps;
+        // Gewichten gaan per 2,5 kg; een gemiddelde daar ver naast = gemengde of afgebroken sets → weglaten.
+        if (Math.abs(av / 2.5 - Math.round(av / 2.5)) * 2.5 > 0.2) return;
+        rows.push({ t: x.t, v: [av] }); return;
       }
       if (!m.split) { rows.push({ t: x.t, v: [x.avg] }); return; }
       // 3 sets per been: herhalingen per set = totaal / gemiddeld / 6. Rm1 (Brzycki) hoort bij het zwaarste been.
