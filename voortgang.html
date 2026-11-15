@@ -219,7 +219,7 @@
     <h2>Per apparaat</h2>
     <p class="sub">Trainingsgewicht per sessie. Groen gestippeld: je laatste maxtest; grijs gestippeld: norm (alleen waar een betrouwbare norm bestaat).</p>
     <div class="multi" id="machines"></div>
-    <p class="note">De export zegt niet welk apparaat welk is; de namen zijn herleid uit de testdagen. Bij de beenpers zijn links en rechts teruggerekend uit het gemiddelde gewicht en de geschatte max van je sterkste been (links). Bij de crunch staat de geschatte max, omdat de export daar geen gemiddeld gewicht bewaart.</p>
+    <p class="note">De export zegt niet welk apparaat welk is; de namen zijn herleid uit de testdagen. Bij de beenpers zijn links en rechts teruggerekend uit het gemiddelde gewicht en de geschatte max van je sterkste been (links). Overal is het trainingsgewicht het gemiddelde over je sets; het gewicht van de zwaarste set staat niet in de export. Bij de crunch is dat gemiddelde berekend uit het totaal en het geschatte aantal herhalingen.</p>
 
     <h2>Trainingsritme</h2>
     <p class="sub">Op welke dagen je naar de sportschool gaat.</p>
@@ -1252,19 +1252,24 @@
     { ph: 'dfdc28af', name: 'Roeien (low row)', test: 'Low Row', minKg: 300 },
     { ph: '155f6ccb', name: 'Borstpers', test: 'Chest Press', minKg: 300 },
     { ph: 'ee236711', name: 'Lat pulldown', test: 'Vertical Traction', minKg: 300 },
-    { ph: '63a61db1', name: 'Crunch (hoge kabel)', useRm1: true, minKg: 300, sub: 'Geschatte max per sessie (geen gemiddeld gewicht in de export).' }
+    { ph: '63a61db1', name: 'Crunch (hoge kabel)', fromTotal: true, minKg: 300, sub: 'Gemiddeld gewicht per set (totaal ÷ herhalingen).' }
   ];
   function machineRows(m) {
     var byDay = {};
     S.ind.forEach(function (x) {
       if (x.ph !== m.ph || !(x.kg >= m.minKg)) return;
-      if (m.useRm1 ? !(x.rm1 > 0) : !(x.avg > 0)) return;
+      if (m.fromTotal ? !(x.rm1 > 0) : !(x.avg > 0)) return;
       var k = dayKey(x.t); if (!byDay[k] || x.kg > byDay[k].kg) byDay[k] = x;
     });
     var rows = [];
     Object.keys(byDay).sort().forEach(function (k) {
       var x = byDay[k];
-      if (m.useRm1) { rows.push({ t: x.t, v: [x.rm1] }); return; }
+      if (m.fromTotal) {
+        // Geen gemiddeld gewicht in de export: herhalingen schatten uit totaal en Rm1 (≈ gemiddelde × 1,33 bij 10 herh.),
+        // afgerond op hele rondes van 3 sets × 2 herh. (bv. 3×10 = 30, 3×12 = 36).
+        var est = x.kg / (x.rm1 / 1.3337), reps = Math.max(6, 6 * Math.round(est / 6));
+        rows.push({ t: x.t, v: [x.kg / reps] }); return;
+      }
       if (!m.split) { rows.push({ t: x.t, v: [x.avg] }); return; }
       // 3 sets per been: herhalingen per set = totaal / gemiddeld / 6. Rm1 (Brzycki) hoort bij het zwaarste been.
       if (!(x.rm1 > 0)) return;
@@ -1360,7 +1365,7 @@
       if (rows.length < 2) return;
       var c1 = css('--s1'), c2 = css('--s2'), good = css('--good'), soft = css('--ink-soft');
       var defs = m.split ? [{ name: 'Links (sterkste)', color: c1 }, { name: 'Rechts', color: c2 }]
-        : [{ name: m.useRm1 ? 'Geschatte max' : 'Trainingsgewicht', color: c1 }];
+        : [{ name: m.fromTotal ? 'Gemiddeld per set' : 'Trainingsgewicht', color: c1 }];
       var refs = [];
       var tst = m.test ? lastTest(m.test) : null;
       if (tst) refs.push({ name: 'Maxtest ' + dKort(tst.t) + (m.split ? ' (2 benen)' : ''), short: 'max ' + fmt(tst.v) + ' kg · ' + dKort(tst.t), v: tst.v, t: tst.t, color: good });
