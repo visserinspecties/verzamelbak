@@ -911,6 +911,31 @@
     el('path', { d: solid, fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, parent);
     if (dash) el('path', { d: dash, fill: 'none', stroke: color, 'stroke-width': 1.5, 'stroke-dasharray': '2 5', 'stroke-linecap': 'round', opacity: .6 }, parent);
   }
+  var SMOOTH = '#d6362f';
+  // Gladgestreken lijn: lokaal-lineaire regressie met Gauss-gewichten (bandbreedte in dagen),
+  // per aaneengesloten stuk metingen; bij een pauze van 21+ dagen begint een nieuw stuk.
+  function smoothPath(pts, xf, yf, bwDays) {
+    var segs = [], cur = [];
+    pts.forEach(function (p, i) {
+      if (i && (p.t - pts[i - 1].t) / DAY >= 21) { segs.push(cur); cur = []; }
+      cur.push(p);
+    });
+    if (cur.length) segs.push(cur);
+    var d = '', bw = bwDays * DAY;
+    segs.forEach(function (sg) {
+      if (sg.length < 2) return;
+      sg.forEach(function (p, i) {
+        var sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+        sg.forEach(function (q) {
+          var dx = (q.t - p.t) / DAY, w = Math.exp(-0.5 * Math.pow((q.t - p.t) / bw, 2));
+          sw += w; sx += w * dx; sy += w * q.v; sxx += w * dx * dx; sxy += w * dx * q.v;
+        });
+        var den = sw * sxx - sx * sx, v = Math.abs(den) < 1e-9 ? sy / sw : (sxx * sy - sx * sxy) / den;
+        d += (i ? 'L' : 'M') + xf(p.t).toFixed(1) + ',' + yf(v).toFixed(1);
+      });
+    });
+    return d;
+  }
   function mLabel(t, withYear) { var d = new Date(t); return MAAND[d.getMonth()] + (withYear || d.getMonth() === 0 ? ' ’' + String(d.getFullYear()).slice(2) : ''); }
 
   function drawTimeline(box) {
@@ -1147,6 +1172,8 @@
     pts.forEach(function (p) { el('circle', { cx: x(p.t), cy: y(p.v), r: 2.6, fill: css('--dot') }, svg); });
     if (R) trendLine(svg, R.pts, x, y2, R.color, 21);
     trendLine(svg, pts, x, y, css('--trend'), 21);
+    var sm = smoothPath(pts, x, y, 28);
+    if (sm) el('path', { d: sm, fill: 'none', stroke: SMOOTH, 'stroke-width': 2, 'stroke-dasharray': '5 4', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, svg);
     var tip = tipFor(box), ring = el('circle', { r: 5, fill: 'none', stroke: css('--ink'), 'stroke-width': 1.5, visibility: 'hidden' }, svg);
     var hit = el('rect', { x: padL, y: 0, width: W - padL - padR, height: H - bottom, fill: 'transparent' }, svg);
     function move(ev) {
@@ -1167,13 +1194,16 @@
     }
     hit.addEventListener('pointermove', move); hit.addEventListener('pointerdown', move);
     hit.addEventListener('pointerleave', function () { tip.hide(); ring.setAttribute('visibility', 'hidden'); });
+    var lg = h('div', 'legend', null, box); lg.style.cssText = 'margin-top:4px;font-size:12px';
     if (R) {
-      var lg = h('div', 'legend', null, box); lg.style.cssText = 'margin-top:4px;font-size:12px';
       var a = h('span', null, null, lg), sa = h('i', 'sw line', null, a); sa.style.background = css('--trend');
       a.appendChild(document.createTextNode(opts.legend + ' (links)'));
       var b = h('span', null, null, lg), sb = h('i', 'sw line', null, b); sb.style.background = R.color;
       b.appendChild(document.createTextNode(R.legend + ' (rechts)'));
     }
+    var c = h('span', null, null, lg), sc = h('i', 'sw line', null, c);
+    sc.style.background = 'repeating-linear-gradient(90deg,' + SMOOTH + ' 0 5px,transparent 5px 9px)';
+    c.appendChild(document.createTextNode('gladgestreken trend' + (R ? ' kg' : '')));
   }
 
   function drawBody(box) {
