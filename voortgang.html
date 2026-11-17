@@ -140,6 +140,11 @@
   .mini-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
   .mini-h h3 { font-size: 15px; }
   .mini-h .now { font-size: 13px; color: var(--ink-2); white-space: nowrap; }
+  .inslink { display: inline-block; margin-top: 6px; font-size: 13px; color: var(--accent); }
+  .splitgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; margin: 0 0 12px; }
+  .splitgrid > div { background: var(--bg); border-radius: 10px; padding: 10px 12px; font-size: 13px; color: var(--ink-2); }
+  .splitgrid b { display: block; font-size: 15px; color: var(--ink); margin: 2px 0; }
+  .splittxt p { margin: 8px 0 0; font-size: 14px; color: var(--ink-2); }
   .note { font-size: 13px; color: var(--ink-soft); margin: 8px 0 0; }
 
   /* tabel */
@@ -211,6 +216,10 @@
     <p class="sub">Grijze puntjes zijn losse metingen, de lijn is de trend (lopende mediaan van vijf metingen).</p>
     <div class="multi" id="body"></div>
     <p class="note">De weegschaal meet vet en spier met een zwak stroompje (bio-impedantie). Vocht, eten en het tijdstip maken een paar procent verschil. Vertrouw daarom de lijn meer dan één meting.</p>
+
+    <h2 id="verklaring">Gewichtssprongen: vet, spier of vocht?</h2>
+    <p class="sub">Elke staaf is het verschil tussen twee opeenvolgende wegingen (hoogstens drie weken uit elkaar), opgesplitst in vet en spier.</p>
+    <div class="card" id="split"></div>
 
     <h2>Kracht</h2>
     <p class="sub">Geschatte maximale kracht (1RM) bij de krachttests op de Biostrength-apparaten: eerste test → beste recente test.</p>
@@ -704,6 +713,54 @@
     var pick = side < 0 ? arr.filter(function (p) { return p.t <= t; }).slice(-n) : arr.filter(function (p) { return p.t >= t; }).slice(0, n);
     return pick.length ? median(pick.map(function (p) { return p.v; })) : null;
   }
+  // Verdeling van gewichtsveranderingen over vet, spier (inclusief vocht) en lichaamsvocht.
+  // Gewicht = vet + spier + een vaste rest (bot e.d.); de weegschaal schat die verdeling uit stroom.
+  function compSplit(S) {
+    var M = S.metric, byDay = {};
+    [['W', 'Weight'], ['F', 'Fat KG'], ['M', 'Muscle Mass'], ['T', 'Total Body Water Perc']].forEach(function (k) {
+      (M[k[1]] || []).forEach(function (p) { (byDay[p.d] = byDay[p.d] || { t: p.t, d: p.d })[k[0]] = p.v; });
+    });
+    var rows = Object.keys(byDay).map(function (k) { return byDay[k]; })
+      .filter(function (r) { return r.W != null && r.F != null && r.M != null; })
+      .sort(function (a, b) { return a.t - b.t; });
+    if (rows.length < 8) return null;
+    rows.forEach(function (r) { r.A = r.T != null ? r.T / 100 * (r.W + KLEDING) : null; });
+    var pairs = [];
+    for (var i = 1; i < rows.length; i++) {
+      var a = rows[i - 1], b = rows[i];
+      if ((b.t - a.t) / DAY > 21) continue;
+      pairs.push({ t0: a.t, t1: b.t, dW: b.W - a.W, dF: b.F - a.F, dM: b.M - a.M, dA: a.A != null && b.A != null ? b.A - a.A : null });
+    }
+    if (pairs.length < 6) return null;
+    function share(list) {
+      var v = 0, f = 0, m = 0;
+      list.forEach(function (q) { v += q.dW * q.dW; f += q.dW * q.dF; m += q.dW * q.dM; });
+      return v > 0 && f + m > 0 ? { fat: f / (f + m), mus: m / (f + m), n: list.length } : null;   // verdeeld over vet + spier (samen 100%)
+    }
+    var big = pairs.filter(function (q) { return Math.abs(q.dW) >= 1; });
+    var withA = pairs.filter(function (q) { return q.dA != null; }), corr = null;
+    if (withA.length > 5) {
+      var mx = 0, my = 0; withA.forEach(function (q) { mx += q.dM; my += q.dA; }); mx /= withA.length; my /= withA.length;
+      var sxy = 0, sxx = 0, syy = 0;
+      withA.forEach(function (q) { sxy += (q.dM - mx) * (q.dA - my); sxx += (q.dM - mx) * (q.dM - mx); syy += (q.dA - my) * (q.dA - my); });
+      corr = sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : null;
+    }
+    var opp = pairs.filter(function (q) { return q.dF * q.dM < 0; }).length / pairs.length;
+    var rest = rows.map(function (r) { return r.W - r.F - r.M; }), rm = rest.reduce(function (x, y) { return x + y; }, 0) / rest.length;
+    var rsd = Math.sqrt(rest.reduce(function (x, y) { return x + (y - rm) * (y - rm); }, 0) / rest.length);
+    // trend per aaneengesloten blok (pauze van 60+ dagen = nieuw blok): gemiddelde eerste tegen laatste wegingen
+    var blocks = [], st = 0;
+    for (var j = 1; j <= rows.length; j++) {
+      if (j === rows.length || (rows[j].t - rows[j - 1].t) / DAY >= 60) { blocks.push(rows.slice(st, j)); st = j; }
+    }
+    function avg(list, k) { return list.reduce(function (x, r) { return x + r[k]; }, 0) / list.length; }
+    var trends = blocks.filter(function (bl) { return bl.length >= 6; }).map(function (bl) {
+      var n = Math.min(4, Math.floor(bl.length / 2)), h0 = bl.slice(0, n), h1 = bl.slice(-n);
+      return { t0: bl[0].t, t1: bl[bl.length - 1].t, dW: avg(h1, 'W') - avg(h0, 'W'), dF: avg(h1, 'F') - avg(h0, 'F'), dM: avg(h1, 'M') - avg(h0, 'M') };
+    });
+    return { rows: rows, pairs: pairs, all: share(pairs), big: share(big), nBig: big.length, corr: corr, opp: opp, rest: rm, restSd: rsd, trends: trends, byDay: byDay };
+  }
+
   function insights(S) {
     var L = [], M = S.metric, W = M['Weight'] || [], F = M['Fat mass Perc'] || [], MM = M['Muscle Mass'] || [];
 
@@ -750,8 +807,17 @@
       if (dd <= 7 && (!jump || Math.abs(dv) > Math.abs(jump.dv))) jump = { a: F[i - 1], b: F[i], dv: dv, dd: Math.round(dd) };
     }
     if (jump && Math.abs(jump.dv) >= 1.5) {
-      L.push({ t: jump.b.t, title: 'Vetpercentage sprong ' + signed(jump.dv) + ' punt in ' + jump.dd + ' dag' + (jump.dd === 1 ? '' : 'en'),
-        text: 'Van ' + fmt(jump.a.v) + ' naar ' + fmt(jump.b.v) + '%. Zoveel vet win of verlies je niet in een paar dagen. De weegschaal meet via stroom, en die gaat makkelijker door vocht. Meer of minder drinken, net gegeten of net getraind geeft zulke sprongen. Meet daarom liefst steeds op hetzelfde moment, vóór het trainen.' });
+      var CS = compSplit(S), extra = '', link = null;
+      if (CS) {
+        var ra = CS.byDay[jump.a.d], rb = CS.byDay[jump.b.d];
+        if (ra && rb && ra.F != null && rb.F != null && ra.M != null && rb.M != null) {
+          extra = ' In kilo’s: vet ' + signed(rb.F - ra.F) + ', spier ' + signed(rb.M - ra.M) + (ra.A != null && rb.A != null ? ', lichaamsvocht ' + signed(rb.A - ra.A) : '') + ' (gewicht ' + signed(rb.W - ra.W) + ').';
+        }
+        if (CS.big && CS.nBig >= 3) extra += ' Over al je sprongen van een kilo of meer komt gemiddeld ' + Math.round(CS.big.mus * 100) + '% uit “spier” (daar zit vocht in) en ' + Math.round(CS.big.fat * 100) + '% uit vet.';
+        link = { text: 'Hoe de sprongen zijn opgebouwd ↓', href: '#verklaring' };
+      }
+      L.push({ t: jump.b.t, link: link, title: 'Vetpercentage sprong ' + signed(jump.dv) + ' punt in ' + jump.dd + ' dag' + (jump.dd === 1 ? '' : 'en'),
+        text: 'Van ' + fmt(jump.a.v) + ' naar ' + fmt(jump.b.v) + '%. Zoveel vet win of verlies je niet in een paar dagen. De weegschaal meet via stroom, en die gaat makkelijker door vocht. Meer of minder drinken, net gegeten of net getraind geeft zulke sprongen.' + extra + ' Meet daarom liefst steeds op hetzelfde moment, vóór het trainen.' });
     }
 
     // recente dip spiermassa
@@ -812,7 +878,7 @@
     if (!has) return;
     INS = insights(S);
     $('subtitle').textContent = 'John Visser · Technogym · ' + dKort(S.tMin) + ' – ' + dKort(S.tMax);
-    drawKpis(); drawTimeline(); drawInsights(); drawBody(); drawStrength(); drawMachines(); drawWeekday(); drawTable();
+    drawKpis(); drawTimeline(); drawInsights(); drawBody(); drawSplit(); drawStrength(); drawMachines(); drawWeekday(); drawTable();
     var f = $('foot'); f.textContent = '';
     f.textContent = S.ind.length + ' oefeningen op apparaten, ' + S.out.length + ' activiteiten daarbuiten, ' + Object.keys(DATA.bio).length +
       ' meetwaarden. Bewaard op dit toestel' + (DATA.saved ? ' (' + dKort(DATA.saved) + ')' : '') + '.';
@@ -1070,6 +1136,7 @@
       var c = h('div', 'card ins', null, box); if (it.nr) c.id = 'ins-' + it.nr;
       h('div', 'badge' + (plain ? ' plain' : ''), label, c);
       var b = h('div', null, null, c); h('h3', null, it.title, b); h('p', null, it.text, b);
+      if (it.link) { var al = h('a', 'inslink', it.link.text, b); al.href = it.link.href; }
     }
     INS.dated.forEach(function (it) { card(it, String(it.nr)); });
     INS.free.forEach(function (it) { card(it, '•', true); });
@@ -1204,6 +1271,86 @@
     var c = h('span', null, null, lg), sc = h('i', 'sw line', null, c);
     sc.style.background = 'repeating-linear-gradient(90deg,' + SMOOTH + ' 0 5px,transparent 5px 9px)';
     c.appendChild(document.createTextNode('gladgestreken trend' + (R ? ' kg' : '')));
+  }
+
+  function drawSplit() {
+    var box = $('split'); if (!box) return; box.textContent = '';
+    var C = compSplit(S), card = box.parentNode;
+    var hd = $('verklaring');
+    var show = !!C && !!C.all;
+    box.style.display = hd.style.display = hd.nextElementSibling.style.display = show ? '' : 'none';
+    if (!show) return;
+    var pct = function (x) { return Math.round(x * 100) + '%'; };
+    var colF = css('--s2'), colM = css('--s1');
+
+    // samenvattingstegels
+    var g = h('div', 'splitgrid', null, box);
+    function tile(lbl, big, small) { var d = h('div', null, null, g); d.appendChild(document.createTextNode(lbl)); h('b', null, big, d); d.appendChild(document.createTextNode(small)); }
+    tile('Gewone sprongen (' + C.all.n + ' keer)', 'vet ' + pct(C.all.fat) + ' · spier ' + pct(C.all.mus), 'van het gewichtsverschil tussen twee wegingen');
+    if (C.big && C.nBig >= 3) tile('Grote sprongen, 1 kg of meer (' + C.nBig + ' keer)', 'vet ' + pct(C.big.fat) + ' · spier ' + pct(C.big.mus), 'vooral vocht en glycogeen in de spier');
+    C.trends.forEach(function (tr) {
+      var wk = Math.round((tr.t1 - tr.t0) / DAY / 7);
+      tile(dKort(tr.t0) + ' → ' + dKort(tr.t1), signed(tr.dW) + ' kg: vet ' + signed(tr.dF) + ' · spier ' + signed(tr.dM), 'trend over ' + wk + ' weken');
+    });
+
+    // staafgrafiek: vet en spier naast elkaar gestapeld, rondje = gewicht, ruit = lichaamsvocht
+    var P = C.pairs, W = Math.max(280, box.clientWidth), H = 210, padL = 38, padR = 8, top = 10, bottom = 24;
+    var ch = h('div', 'chart', null, box), svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, height: H, role: 'img', 'aria-label': 'Gewichtsverandering per weging, verdeeld over vet en spier' }, ch);
+    var ext = 0.5; P.forEach(function (q) { ext = Math.max(ext, q.dF > 0 ? q.dF : 0, q.dM > 0 ? q.dM : 0); });
+    var up = 0.5, dn = 0.5;
+    P.forEach(function (q) { up = Math.max(up, Math.max(q.dF, 0) + Math.max(q.dM, 0), q.dW); dn = Math.max(dn, Math.max(-q.dF, 0) + Math.max(-q.dM, 0), -q.dW); });
+    up *= 1.08; dn *= 1.08;
+    var y = function (v) { return top + (up - v) / (up + dn) * (H - top - bottom); };
+    var ax = el('g', { class: 'axis' }, svg);
+    niceTicks(-dn, up, 4).forEach(function (v) {
+      el('line', { x1: padL, x2: W - padR, y1: y(v), y2: y(v), stroke: v === 0 ? css('--ink-soft') : css('--grid') }, ax);
+      el('text', { x: padL - 5, y: y(v) + 4, 'text-anchor': 'end' }, ax).textContent = signed(v, v % 1 ? 1 : 0).replace('±', '');
+    });
+    var step = (W - padL - padR) / P.length, bw = Math.max(2, Math.min(14, step * 0.7));
+    var xc = function (i) { return padL + step * (i + 0.5); };
+    var lastM = -1, lastX = -1e9;
+    P.forEach(function (q, i) {
+      var cx = xc(i), pos = 0, neg = 0;
+      [['dF', colF], ['dM', colM]].forEach(function (k) {
+        var v = q[k[0]], y0, y1;
+        if (v >= 0) { y0 = y(pos); y1 = y(pos + v); pos += v; } else { y0 = y(neg); y1 = y(neg + v); neg += v; }
+        if (Math.abs(y0 - y1) > 0.2) el('rect', { x: cx - bw / 2, y: Math.min(y0, y1), width: bw, height: Math.abs(y0 - y1), fill: k[1], rx: Math.min(2, bw / 3) }, svg);
+      });
+      var m = new Date(q.t1).getFullYear() * 12 + new Date(q.t1).getMonth();
+      if (m !== lastM && cx - lastX > 40) { el('text', { x: cx, y: H - 7, 'text-anchor': 'middle' }, ax).textContent = mLabel(q.t1, new Date(q.t1).getMonth() === 0 || lastM < 0); lastM = m; lastX = cx; }
+    });
+    P.forEach(function (q, i) {
+      el('circle', { cx: xc(i), cy: y(q.dW), r: 2.8, fill: css('--card'), stroke: css('--ink'), 'stroke-width': 1.6 }, svg);
+      if (q.dA != null) { var cx = xc(i), cy = y(q.dA); el('path', { d: 'M' + cx + ',' + (cy - 3.5) + 'L' + (cx + 3.5) + ',' + cy + 'L' + cx + ',' + (cy + 3.5) + 'L' + (cx - 3.5) + ',' + cy + 'Z', fill: 'none', stroke: css('--s3'), 'stroke-width': 1.4 }, svg); }
+    });
+    var tip = tipFor(ch), hit = el('rect', { x: padL, y: 0, width: W - padL - padR, height: H - bottom, fill: 'transparent' }, svg);
+    function move(ev) {
+      var rect = svg.getBoundingClientRect(), px = (ev.clientX - rect.left) * (W / rect.width);
+      var i = Math.max(0, Math.min(P.length - 1, Math.floor((px - padL) / step))), q = P[i];
+      tip.show(xc(i) * rect.width / W, y(q.dW) * rect.height / H, function (t) {
+        h('div', 't', dKort(q.t0) + ' → ' + dKort(q.t1), t);
+        tipRow(t, 'Gewicht', signed(q.dW) + ' kg');
+        tipRow(t, 'Vet', signed(q.dF) + ' kg', colF);
+        tipRow(t, 'Spier (incl. vocht)', signed(q.dM) + ' kg', colM);
+        if (q.dA != null) tipRow(t, 'Lichaamsvocht', signed(q.dA) + ' kg', css('--s3'));
+      });
+    }
+    hit.addEventListener('pointermove', move); hit.addEventListener('pointerdown', move);
+    hit.addEventListener('pointerleave', function () { tip.hide(); });
+    var lg = h('div', 'legend', null, ch); lg.style.marginTop = '4px';
+    [['Vet', colF, 'sw'], ['Spier (met vocht)', colM, 'sw']].forEach(function (k) { var sp = h('span', null, null, lg), sw = h('i', 'sw', null, sp); sw.style.background = k[1]; sp.appendChild(document.createTextNode(k[0])); });
+    var s1 = h("span", null, null, lg);
+    var rg = h('i', 'sw', null, s1); rg.style.cssText = 'border-radius:50%;border:1.6px solid ' + css('--ink') + ';width:9px;height:9px'; s1.appendChild(document.createTextNode('Gewichtsverschil'));
+    if (P.some(function (q) { return q.dA != null; })) {
+      var s2 = h('span', null, null, lg), dm = h('i', 'sw', null, s2); dm.style.cssText = 'border:1.6px solid ' + css('--s3') + ';width:8px;height:8px;transform:rotate(45deg);border-radius:1px'; s2.appendChild(document.createTextNode('Lichaamsvocht (kg)'));
+    }
+
+    // uitleg, met de eigen cijfers
+    var tx = h('div', 'splittxt', null, box);
+    h('p', null, 'Bij deze weegschaal is gewicht altijd vet + spier + een vaste rest van ongeveer ' + fmt(C.rest, 1) + ' kg (bot en overig; schommelt maar ' + fmt(C.restSd, 2) + ' kg). Vet en spier tellen dus altijd op tot het gewichtsverschil. De verdeling zelf is een schatting uit stroom, geen tweede weging.', tx);
+    h('p', null, 'In de korte sprongen zit gemiddeld ' + pct(C.all.mus) + ' in “spier” en ' + pct(C.all.fat) + ' in vet. Spier bevat vocht' + (C.corr != null ? ': de spiersprongen volgen het lichaamsvocht ' + (C.corr > 0.7 ? 'bijna een-op-een' : 'duidelijk') + ' (correlatie ' + fmt(C.corr, 2) + ')' : '') + '. Een sprong binnen een paar dagen is dus vooral vocht en glycogeen (drinken, zout, eten, training), geen spier of vet.', tx);
+    h('p', null, 'Vet en spier bewegen in ' + pct(C.opp) + ' van de wegingen tegen elkaar in. Dat is deels meetfout: vocht verandert hoe de stroom door je lichaam gaat, en de weegschaal rekent dat toe aan vet of spier.', tx);
+    if (C.trends.length) h('p', null, 'Kijk voor echte verandering naar de trend over weken, zoals in de tegels hierboven: daar zie je pas of het vet of spier is.', tx);
   }
 
   function drawBody(box) {
