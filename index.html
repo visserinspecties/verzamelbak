@@ -492,6 +492,15 @@
     if (d.getFullYear() !== t.getFullYear()) opts.year = 'numeric';
     return { text: d.toLocaleDateString('nl-NL', opts).replace('.', ''), now: d <= t };
   }
+  // Lijst "EPA projecten": tel de open projectregels (regel met een postcode, niet afgevinkt).
+  // Telt live mee: vink je een regel af, dan zakt het getal in de wolk meteen.
+  function openCount(it) {
+    var lines = String(it.text || '').split('\n');
+    if (!/^epa projecten\b/i.test(lines[0].trim())) return null;
+    return lines.slice(1).filter(function (l) {
+      return l.indexOf('✓ ') !== 0 && /\b\d{4} ?[A-Z]{2}\b/.test(l);
+    }).length;
+  }
   // Knipperen: deadline is vandaag of voorbij, en het item is sinds die deadline nog niet geopend.
   // it.dueSeen bewaart de deadline waarbij je hem bekeken hebt; een nieuwe datum knippert dus weer.
   function blinks(it) {
@@ -544,11 +553,11 @@
             lbl.style.setProperty('--hr', ((rnd(id, 'hr') - 0.5) * 3).toFixed(1) + 'deg');
           }
           b.appendChild(lbl);
-          var di = dueInfo(item.due);
-          if (di) {
+          var di = dueInfo(item.due), oc = openCount(item);
+          if (di || oc !== null) {
             var ds = document.createElement('span');
-            ds.className = 'due' + (di.now ? ' now' : '') + (blinks(item) ? ' blink' : '');
-            ds.textContent = di.text;
+            ds.className = 'due' + (di && di.now ? ' now' : '') + (di && blinks(item) ? ' blink' : '');
+            ds.textContent = [di ? di.text : '', oc !== null ? oc + ' open' : ''].filter(Boolean).join(' · ');
             b.appendChild(ds);
           }
 
