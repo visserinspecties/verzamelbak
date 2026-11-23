@@ -616,7 +616,7 @@
   var RE_ADRES = /\b[a-z]+(straat|weg|dijk|laan|plein|gracht|kade|singel|hof|daal|boulevard|plaats)\s+\d/;
   var RE_WERK = /\b(epa|label|labels|afmeting\w*|dossier\w*|opname|project\w*|vabi|huismaten|isolatie|installatie\w*|maatwerk\w*|meting|co2|mappen|map|foto\w*|bluebeam|bleubeam|cloudflare|tool|tools|aantekeningen|pand|appartement|woning|ep-?online|ep-?sys|bcrg|nta|brl|keuring|rapport\w*|tekening\w*)\b/;
   var RE_GELD = /\b(btw|rekening\w*|factu\w*|belasting\w*|boete\w*|flynth|abbo|abonnement\w*|betal\w*|incasso|aanslag|declar\w*|verzekering\w*|bank|kosten|bv|creditnota|digidentity|aangifte)\b/;
-  var RE_MENSEN = /\b(bel|bellen|gebeld|terugbellen|mail|mailen|mailtje|spreken|whatsapp|appen|contact)\b/;
+  var RE_MENSEN = /\b(bel|bellen|gebeld|terugbellen|mail|mailen|mailtje|spreken|whatsapp|appen|appje|contact|overleg|overleggen|bespreken|terugkoppelen)\b/;
   var RE_MENSEN_ZWAK = /\b(afspraak|afspreken|langs)\b/;   // telt niet bij een eigen privé-afspraak (fysio, lens)
   var RE_PRIVE = /\b(apotheek|fysio\w*|dokter|doktonline|huisarts|tandarts|griepprik|lens|ikea|batterij\w*|garen|naaigaren|auto|beurt|apk|boodschap\w*|saga|boot|verjaardag|bier|eten|diner|kapper|sport|gym)\b/;
   var RE_TEL = /(?:\+|00)\d{2}[\s\-]?(?:\(0\))?\d(?:[\s\-]?\d){7,10}|\b0\d(?:[\s\-]?\d){8}\b/g;
@@ -1395,11 +1395,13 @@
       .then(function (r) { return r.ok ? r.json() : { value: [] }; }, function () { return { value: [] }; });
   }
 
-  var ACTIEWOORD = /^(bel|bellen|terugbellen|gebeld|mail|mailen|mailtje|afspraak|afspreken|whatsapp|appen|spreken|contact|met|over|en|van|voor|nog|even)$/i;
+  var ACTIEWOORD = /^(bel|bellen|terugbellen|gebeld|mail|mailen|mailtje|afspraak|afspreken|whatsapp|appen|appje|spreken|contact|overleg|overleggen|bespreken|vragen|vraag|terugkoppelen|sturen|met|over|en|van|voor|nog|even)$/i;
   function zoekNaam(it) {
     var eerste = String(it.text || '').trim().split('\n')[0].replace(/^✓ /, '').replace(/["<>(),:]/g, ' ');
     var w = eerste.split(/\s+/).filter(function (x) { return x && !ACTIEWOORD.test(x) && /^[A-Za-zÀ-ÿ'\-]{2,}$/.test(x); });
-    return w.slice(0, 2).join(' ');
+    // "Jacob overleg" -> "Jacob": een naam begint met een hoofdletter; losse gewone woorden horen er niet bij
+    var hoofd = w.filter(function (x) { return /^[A-ZÀ-Ý]/.test(x); });
+    return (hoofd.length ? hoofd : w.slice(0, 1)).slice(0, 2).join(' ');
   }
   function heeftContact(t) {
     t = String(t || '');
@@ -1525,12 +1527,14 @@
         var g = document.createElement('span'); g.className = 'gegevens';
         // nummers onbreekbaar tonen (niet "06-" op de ene en de rest op de volgende regel)
         var telsZicht = k.tels.map(function (x) { return x.replace(/-/g, '\u2011').replace(/ /g, '\u00a0'); }).join(' / ');
-        g.appendChild(document.createTextNode([k.naam + (k.bedrijf ? ' (' + k.bedrijf + ')' : ''), telsZicht, k.email].filter(Boolean).join(' · ')));
+        var naamZicht = /@/.test(k.naam || '') ? (k.bedrijf || '') : k.naam + (k.bedrijf ? ' (' + k.bedrijf + ')' : '');
+        g.appendChild(document.createTextNode([naamZicht, telsZicht, k.email].filter(Boolean).join(' · ')));
         var b = document.createElement('span'); b.className = 'bron'; b.textContent = 'uit ' + k.bronnen.join(', ');
         g.appendChild(b);
         var ja = document.createElement('button'); ja.className = 'ja'; ja.type = 'button'; ja.textContent = '✓'; ja.setAttribute('aria-label', 'Klopt, in het item zetten');
         ja.addEventListener('click', function () {
-          var regels = [k.naam + (k.bedrijf ? ' (' + k.bedrijf + ')' : ''), k.tels.join(' / '), k.email].filter(Boolean);
+          var naamRegel = /@/.test(k.naam || '') ? (k.bedrijf || '') : k.naam + (k.bedrijf ? ' (' + k.bedrijf + ')' : '');
+          var regels = [naamRegel, k.tels.join(' / '), k.email].filter(Boolean);
           it.text = String(it.text).replace(/\s+$/, '') + '\n' + regels.join('\n');
           touch(it); save(); render(); showItem(it);
         });
