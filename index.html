@@ -49,7 +49,7 @@
     min-height: 100vh;
     max-width: 640px;          /* smal genoeg om over meerdere regels te vallen */
     margin: 0 auto;
-    padding: 10vh 20px 160px;
+    padding: calc(10vh + 60px) 20px 160px;   /* boven: ruimte voor de categoriebalk */
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
@@ -266,6 +266,56 @@
     text-decoration: underline;
   }
 
+  /* Categorieën: vier icoontjes bovenin het midden. Uit = grijs en rustig, aan = in kleur. */
+  #catBar {
+    position: fixed;
+    left: 50%; transform: translateX(-50%);
+    top: env(safe-area-inset-top);
+    height: 56px;
+    display: flex; align-items: center;
+    padding: 0 6px;
+    background: var(--bg);
+    border-radius: 0 0 22px 22px;
+    z-index: 4;
+  }
+  #catBar.verborgen { display: none; }
+  .catBtn {
+    width: 40px; height: 56px;
+    display: flex; align-items: center; justify-content: center;
+    background: none; border: 0; padding: 0; cursor: pointer;
+    font-size: 19px; line-height: 1;
+    filter: grayscale(1); opacity: .45;
+    position: relative;
+  }
+  .catBtn.on { filter: none; opacity: 1; }
+  .catBtn.on::after {
+    content: ''; position: absolute; bottom: 9px; left: 50%;
+    width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%;
+    background: var(--accent);
+  }
+  #catInfo {
+    position: fixed;
+    left: 50%; transform: translateX(-50%);
+    top: calc(env(safe-area-inset-top) + 50px);
+    display: none;
+    font: inherit; font-size: 12px;
+    color: var(--accent);
+    background: none; border: 0;
+    padding: 8px 12px;
+    white-space: nowrap;
+    cursor: pointer;
+    z-index: 4;
+  }
+  #catInfo.open { display: block; }
+  /* In het item-venster: bij welke categorie hoort dit */
+  .catline { display: flex; align-items: center; gap: 2px; margin-top: 10px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
+  .catline .catBtn { width: 40px; height: 40px; font-size: 18px; }
+  .catline .catBtn.on::after { bottom: 3px; }
+  .catline .auto { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 10px 6px; cursor: pointer; text-decoration: underline; }
+  .catline .autotxt { padding: 0 6px; }
+  /* telefoonnummer in de tekst: tik = bellen */
+  .bigtext a.tel { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+
   /* Vensters */
   dialog {
     border: 0;
@@ -340,6 +390,8 @@
 <button id="searchBtn" aria-label="Zoeken">
   <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>
 </button>
+<div id="catBar" role="toolbar" aria-label="Filter op categorie"></div>
+<button id="catInfo" type="button"></button>
 <div id="searchBar">
   <input type="search" id="searchInput" placeholder="Zoek in de emmer…" autocomplete="off" autocorrect="off" spellcheck="false" enterkeyhint="search" aria-label="Zoeken">
   <button id="searchClear" aria-label="Zoeken sluiten">×</button>
@@ -379,6 +431,7 @@
   <p class="bigtext" id="itemText"></p>
   <textarea id="editText" style="display:none"></textarea>
   <p class="meta" id="itemMeta"></p>
+  <div class="catline" id="itemCats"></div>
   <p class="meta"><a id="itemLink" target="_blank" rel="noopener" style="display:none;color:inherit"></a></p>
   <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button><button id="itemDueBlink" type="button" style="display:none">knipper weer</button></div>
   <div id="viewRows">
@@ -522,15 +575,85 @@
     return q.split(/\s+/).every(function (w) { return hay.indexOf(w) > -1; });
   }
 
+  /* ---------- categorieën ----------
+     Vier categorieën. Een item kan er meer hebben: "Mensen" is een actie (bellen, mailen,
+     afspreken), de andere drie zijn onderwerpen. "Reimer bellen over Heilleweg" = Werk + Mensen.
+     Automatisch op trefwoorden; tik je ze zelf aan in het item, dan geldt jouw keuze (it.cats). */
+  var CATS = [
+    { id: 'werk',   ico: '📐', naam: 'Werk' },
+    { id: 'geld',   ico: '💶', naam: 'Geld' },
+    { id: 'mensen', ico: '📞', naam: 'Mensen' },
+    { id: 'prive',  ico: '🏠', naam: 'Privé' }
+  ];
+  function catNaam(id) { return CATS.filter(function (c) { return c.id === id; })[0] || {}; }
+  var RE_POSTCODE = /\b\d{4} ?[A-Z]{2}\b/;
+  var RE_ADRES = /\b[a-z]+(straat|weg|dijk|laan|plein|gracht|kade|singel|hof|daal|boulevard|plaats)\s+\d/;
+  var RE_WERK = /\b(epa|label|labels|afmeting\w*|dossier\w*|opname|project\w*|vabi|huismaten|isolatie|installatie\w*|maatwerk\w*|meting|co2|mappen|map|foto\w*|bluebeam|bleubeam|cloudflare|tool|tools|aantekeningen|pand|appartement|woning|ep-?online|ep-?sys|bcrg|nta|brl|keuring|rapport\w*|tekening\w*)\b/;
+  var RE_GELD = /\b(btw|rekening\w*|factu\w*|belasting\w*|boete\w*|flynth|abbo|abonnement\w*|betal\w*|incasso|aanslag|declar\w*|verzekering\w*|bank|kosten|bv|creditnota|digidentity|aangifte)\b/;
+  var RE_MENSEN = /\b(bel|bellen|gebeld|terugbellen|mail|mailen|mailtje|spreken|whatsapp|appen|contact)\b/;
+  var RE_MENSEN_ZWAK = /\b(afspraak|afspreken|langs)\b/;   // telt niet bij een eigen privé-afspraak (fysio, lens)
+  var RE_PRIVE = /\b(apotheek|fysio\w*|dokter|doktonline|huisarts|tandarts|griepprik|lens|ikea|batterij\w*|garen|naaigaren|auto|beurt|apk|boodschap\w*|saga|boot|verjaardag|bier|eten|diner|kapper|sport|gym)\b/;
+  var RE_TEL = /(?:\+|00)\d{2}[\s\-]?(?:\(0\))?\d(?:[\s\-]?\d){7,10}|\b0\d(?:[\s\-]?\d){8}\b/g;
+  var RE_MAILADRES = /[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}/i;
+
+  function autoCats(it) {
+    var t = String(it.text || ''), n = norm(t), eerste = t.trim().split('\n')[0].replace(/^✓ /, '').trim();
+    if (/^epa (projecten|afgewerkt)\b/i.test(eerste)) return ['werk'];      // vaste lijsten
+    var c = {};
+    if (RE_POSTCODE.test(t) || RE_ADRES.test(n) || RE_WERK.test(n)) c.werk = true;
+    if (RE_GELD.test(n)) c.geld = true;
+    if (RE_PRIVE.test(n)) c.prive = true;
+    if (RE_MENSEN.test(n) || RE_MAILADRES.test(t) || t.match(RE_TEL)) c.mensen = true;
+    if (!c.prive && RE_MENSEN_ZWAK.test(n)) c.mensen = true;
+    // Alleen een naam (één of twee woorden met een hoofdletter, geen cijfers) en verder niets: Mensen
+    if (!Object.keys(c).length) {
+      var w = eerste.split(/\s+/).filter(Boolean);
+      if (t.indexOf('\n') < 0 && w.length && w.length <= 2 && !/\d/.test(eerste) &&
+          w.every(function (x) { return /^[A-ZÀ-Ý]/.test(x); })) c.mensen = true;
+    }
+    return CATS.map(function (k) { return k.id; }).filter(function (id) { return c[id]; });
+  }
+  function catsVan(it) { return Array.isArray(it.cats) ? it.cats : autoCats(it); }
+
+  // Filter: alleen in het geheugen. Na herladen, of na een tijd weg uit de app, staat alles weer aan.
+  var filterCat = null, verborgenSinds = 0;
+  function inFilter(it) { return !filterCat || catsVan(it).indexOf(filterCat) > -1; }
+  function zetFilter(id) {
+    filterCat = (filterCat === id) ? null : id;
+    render();
+  }
+  function tekenCatBar() {
+    var bar = $('catBar'); bar.innerHTML = '';
+    CATS.forEach(function (c) {
+      var b = document.createElement('button');
+      b.className = 'catBtn' + (filterCat === c.id ? ' on' : '');
+      b.textContent = c.ico;
+      b.setAttribute('aria-label', 'Alleen ' + c.naam);
+      b.setAttribute('aria-pressed', filterCat === c.id ? 'true' : 'false');
+      b.addEventListener('click', function () { zetFilter(c.id); });
+      bar.appendChild(b);
+    });
+    var info = $('catInfo');
+    if (filterCat) {
+      var c = catNaam(filterCat);
+      info.textContent = 'alleen ' + c.naam + ' · tik om alles te zien';
+      info.classList.add('open');
+    } else info.classList.remove('open');
+  }
+  $('catInfo').addEventListener('click', function () { filterCat = null; render(); });
+
   function render() {
     var allActive = items.filter(function (i) { return !i.archived; });
-    var active = allActive.filter(matches);
+    var active = allActive.filter(matches).filter(inFilter);
+    tekenCatBar();
     cloud.innerHTML = '';
 
     if (!active.length) {
       var p = document.createElement('p');
       p.className = 'empty';
-      p.textContent = query.trim() ? 'Niets gevonden in de wolk.' : 'De emmer is leeg. Gooi er iets in met het plusje.';
+      p.textContent = query.trim() ? 'Niets gevonden in de wolk.'
+        : filterCat ? 'Niets open bij ' + catNaam(filterCat).naam + '.'
+        : 'De emmer is leeg. Gooi er iets in met het plusje.';
       cloud.appendChild(p);
     } else {
       // Mengvolgorde is stabiel (op hash), zodat het amorf oogt maar niet verspringt
@@ -595,19 +718,26 @@
         a.addEventListener('click', function () { renderArchive(); archDlg.showModal(); });
         cloud.appendChild(a);
       }
+    } else if (filterCat) {
+      $('activeCount').textContent = active.length + ' van ' + allActive.length;
     } else {
       $('activeCount').textContent = 'actief (' + allActive.length + ')';
     }
   }
 
   var searchBtn = $('searchBtn'), searchBar = $('searchBar'), searchInput = $('searchInput');
+  // Zoeken kijkt altijd in de hele emmer: het categoriefilter gaat uit en de balk maakt plaats.
   function openSearch() {
+    filterCat = null;
     searchBar.classList.add('open'); searchBtn.classList.add('on');
+    $('catBar').classList.add('verborgen');
+    render();
     searchInput.focus();
   }
   function closeSearch() {
     query = ''; searchInput.value = '';
     searchBar.classList.remove('open'); searchBtn.classList.remove('on');
+    $('catBar').classList.remove('verborgen');
     searchInput.blur();
     render();
   }
@@ -672,13 +802,34 @@
       s.className = 'ln';
       if (!l.trim()) { s.className += ' empty'; s.textContent = '\u200b'; }
       else {
-        if (isDone(l)) { s.className += ' done'; s.textContent = l.slice(DONE.length); } else s.textContent = l;
+        var zicht = isDone(l) ? l.slice(DONE.length) : l;
+        if (isDone(l)) s.className += ' done';
+        if (clickable) zetMetTelLinks(s, zicht); else s.textContent = zicht;
         if (clickable) { s.setAttribute('data-i', i); s.title = isDone(l) ? 'Tik om terug te zetten' : 'Tik om af te vinken'; }
       }
       el.appendChild(s);
     });
   }
+  // Telefoonnummers in de tekst worden een bel-link (tik = bellen, niet afvinken)
+  function telNummer(ruw) {
+    var d = ruw.replace(/[^\d+]/g, '').replace(/^00/, '+').replace(/\(0\)/, '');
+    if (d.charAt(0) === '+') return d.length >= 11 && d.length <= 14 ? d : null;
+    return d.length === 10 ? d : null;
+  }
+  function zetMetTelLinks(el, tekst) {
+    var pos = 0, m; RE_TEL.lastIndex = 0;
+    while ((m = RE_TEL.exec(tekst))) {
+      var nr = telNummer(m[0]); if (!nr) continue;
+      if (m.index > pos) el.appendChild(document.createTextNode(tekst.slice(pos, m.index)));
+      var a = document.createElement('a');
+      a.className = 'tel'; a.href = 'tel:' + nr; a.textContent = m[0];
+      el.appendChild(a);
+      pos = m.index + m[0].length;
+    }
+    if (pos < tekst.length) el.appendChild(document.createTextNode(tekst.slice(pos)));
+  }
   $('itemText').addEventListener('click', function (e) {
+    if (e.target.closest && e.target.closest('a.tel')) return;     // bellen, niet afvinken
     var s = e.target.closest && e.target.closest('.ln[data-i]'); if (!s) return;
     var it = find(currentId); if (!it) return;
     var lines = it.text.split('\n'), i = +s.getAttribute('data-i');
@@ -703,6 +854,38 @@
     kb.textContent = blinks(it) ? 'knippert ✓' : 'knipper weer';
     kb.className = blinks(it) ? 'aan' : '';
     $('itemHl').className = 'ico' + (it.hl ? ' on' : '');
+    toonItemCats(it);
+  }
+  // Categorie corrigeren: tik een icoontje aan of uit. Vanaf dan geldt jouw keuze voor dit item.
+  function toonItemCats(it) {
+    var el = $('itemCats'); el.innerHTML = '';
+    var huidig = catsVan(it), handmatig = Array.isArray(it.cats);
+    CATS.forEach(function (c) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'catBtn' + (huidig.indexOf(c.id) > -1 ? ' on' : '');
+      b.textContent = c.ico;
+      b.setAttribute('aria-label', c.naam);
+      b.addEventListener('click', function () {
+        var set = catsVan(it).slice(), i = set.indexOf(c.id);
+        if (i > -1) set.splice(i, 1); else set.push(c.id);
+        it.cats = CATS.map(function (k) { return k.id; }).filter(function (id) { return set.indexOf(id) > -1; });
+        touch(it); save(); render(); showItem(it);
+      });
+      el.appendChild(b);
+    });
+    if (handmatig) {
+      var a = document.createElement('button');
+      a.type = 'button'; a.className = 'auto'; a.textContent = 'automatisch';
+      a.title = 'Terug naar de automatische indeling';
+      a.addEventListener('click', function () { delete it.cats; touch(it); save(); render(); showItem(it); });
+      el.appendChild(a);
+    } else {
+      var s = document.createElement('span');
+      s.className = 'autotxt';
+      s.textContent = huidig.length ? '(automatisch)' : '(geen categorie — tik er een aan)';
+      el.appendChild(s);
+    }
   }
   // Markeren aan/uit
   $('itemHl').addEventListener('click', function () {
@@ -1210,7 +1393,12 @@
 
   // Wanneer synchroniseren: bij openen, bij terugkeer naar de app, bij weer online, en elke minuut
   // (render erbij: als de app over middernacht open blijft, gaat een deadline van vandaag dan ook knipperen)
-  document.addEventListener('visibilitychange', function () { if (!document.hidden) { render(); sync(); } });
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { verborgenSinds = Date.now(); return; }
+    // Langer dan 20 minuten weg: categoriefilter uit, zodat je nooit denkt dat er iets kwijt is
+    if (filterCat && verborgenSinds && Date.now() - verborgenSinds > 20 * 60000) filterCat = null;
+    render(); sync();
+  });
   window.addEventListener('online', sync);
   setInterval(function () { if (!document.hidden) sync(); }, 60000);
 
