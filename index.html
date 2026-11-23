@@ -316,6 +316,13 @@
   .catline .autotxt { padding: 0 6px; }
   /* telefoonnummer in de tekst: tik = bellen */
   .bigtext a.tel { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  /* WhatsApp-knopje achter een mobiel nummer: klein icoon, groot tikvlak */
+  .bigtext a.wa {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 40px; height: 32px; margin: -6px -4px -6px 2px; vertical-align: middle;
+  }
+  .bigtext a.wa svg { width: 22px; height: 22px; fill: #25a244; }
+  .bigtext a.wa svg .tl { fill: #fff; }
   /* Voorstel met gevonden contactgegevens: klopt dit? ✓ / ✗ */
   #itemSuggest { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
   #itemSuggest:empty { display: none; }
@@ -835,6 +842,14 @@
     if (d.charAt(0) === '+') return d.length >= 11 && d.length <= 14 ? d : null;
     return d.length === 10 ? d : null;
   }
+  // WhatsApp-nummer (internationaal, zonder +): alleen mobiel. NL: 06 / +316; buitenland: altijd tonen.
+  function waNummer(nr) {
+    if (/^06\d{8}$/.test(nr)) return '31' + nr.slice(1);
+    if (/^\+316\d{8}$/.test(nr)) return nr.slice(1);
+    if (/^\+31/.test(nr)) return null;               // Nederlands vast nummer
+    if (/^\+\d{10,13}$/.test(nr)) return nr.slice(1);
+    return null;
+  }
   function zetMetTelLinks(el, tekst) {
     var pos = 0, m; RE_TEL.lastIndex = 0;
     while ((m = RE_TEL.exec(tekst))) {
@@ -843,12 +858,20 @@
       var a = document.createElement('a');
       a.className = 'tel'; a.href = 'tel:' + nr; a.textContent = m[0];
       el.appendChild(a);
+      var wn = waNummer(nr);
+      if (wn) {
+        var w = document.createElement('a');
+        w.className = 'wa'; w.href = 'https://wa.me/' + wn; w.target = '_blank'; w.rel = 'noopener';
+        w.setAttribute('aria-label', 'WhatsApp naar ' + m[0]); w.title = 'WhatsApp';
+        w.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2a8.6 8.6 0 0 0-7.4 13l-1.2 4.4 4.5-1.2A8.6 8.6 0 1 0 12 3.2z"/><path class="tl" d="M8.9 8.2c.3-.3.7-.3.9 0l.9 1.6c.1.3.1.6-.1.8l-.5.6c.6 1.2 1.6 2.2 2.8 2.8l.6-.5c.2-.2.5-.2.8-.1l1.6.9c.3.2.3.6 0 .9l-.7.7c-.5.5-1.3.6-2 .3-2.3-1-4.1-2.8-5.1-5.1-.3-.7-.2-1.5.3-2z"/></svg>';
+        el.appendChild(w);
+      }
       pos = m.index + m[0].length;
     }
     if (pos < tekst.length) el.appendChild(document.createTextNode(tekst.slice(pos)));
   }
   $('itemText').addEventListener('click', function (e) {
-    if (e.target.closest && e.target.closest('a.tel')) return;     // bellen, niet afvinken
+    if (e.target.closest && e.target.closest('a.tel, a.wa')) return;     // bellen of WhatsApp, niet afvinken
     var s = e.target.closest && e.target.closest('.ln[data-i]'); if (!s) return;
     var it = find(currentId); if (!it) return;
     var lines = it.text.split('\n'), i = +s.getAttribute('data-i');
