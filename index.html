@@ -316,6 +316,23 @@
   .catline .autotxt { padding: 0 6px; }
   /* telefoonnummer in de tekst: tik = bellen */
   .bigtext a.tel { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  /* Voorstel met gevonden contactgegevens: klopt dit? ✓ / ✗ */
+  #itemSuggest { margin-top: 12px; font-size: 13px; color: var(--ink-soft); }
+  #itemSuggest:empty { display: none; }
+  #itemSuggest .kop { margin: 0 0 4px; }
+  #itemSuggest .kand {
+    display: flex; align-items: center; gap: 4px;
+    border: 1px dashed var(--line); border-radius: 12px;
+    padding: 6px 4px 6px 12px; margin-top: 6px; color: var(--ink);
+  }
+  #itemSuggest .kand .gegevens { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.4; }
+  #itemSuggest .kand .bron { display: block; font-size: 11px; color: var(--ink-soft); }
+  #itemSuggest .kand button {
+    width: 44px; height: 44px; flex: none;
+    font-size: 20px; background: none; border: 0; cursor: pointer; color: var(--ink-soft);
+  }
+  #itemSuggest .kand button.ja { color: #2e7d32; }
+  #itemSuggest .link { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 8px 0; cursor: pointer; text-decoration: underline; }
 
   /* Vensters */
   dialog {
@@ -433,6 +450,7 @@
   <textarea id="editText" style="display:none"></textarea>
   <p class="meta" id="itemMeta"></p>
   <div class="catline" id="itemCats"></div>
+  <div id="itemSuggest" aria-live="polite"></div>
   <p class="meta"><a id="itemLink" target="_blank" rel="noopener" style="display:none;color:inherit"></a></p>
   <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button><button id="itemDueBlink" type="button" style="display:none">knipper weer</button></div>
   <div id="viewRows">
@@ -856,6 +874,7 @@
     kb.className = blinks(it) ? 'aan' : '';
     $('itemHl').className = 'ico' + (it.hl ? ' on' : '');
     toonItemCats(it);
+    toonSuggesties(it);
   }
   // Categorie corrigeren: tik een icoontje aan of uit. Vanaf dan geldt jouw keuze voor dit item.
   function toonItemCats(it) {
@@ -1031,13 +1050,14 @@
   }
   function randStr(n) { var a = new Uint8Array(n); crypto.getRandomValues(a); return b64url(a); }
 
-  function login() {
+  // extraScope: om één keer toestemming te vragen voor iets nieuws (bv. contactpersonen lezen)
+  function login(extraScope) {
     var verifier = randStr(48), st = randStr(16);
     return crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)).then(function (h) {
       lsSet(PKCE_KEY, { v: verifier, s: st });
       var q = new URLSearchParams({
         client_id: CFG.clientId, response_type: 'code', redirect_uri: REDIRECT,
-        response_mode: 'query', scope: CFG.scope, state: st,
+        response_mode: 'query', scope: CFG.scope + (extraScope ? ' ' + extraScope : ''), state: st,
         code_challenge: b64url(h), code_challenge_method: 'S256',
         domain_hint: 'organizations'
       });
@@ -1318,6 +1338,194 @@
         });
       }).then(null, function () {});      // lukt één ding niet, dan de volgende keer opnieuw
     }, Promise.resolve());
+  }
+
+  /* ---------- contactgegevens opzoeken bij een Mensen-item ----------
+     Open je een Mensen-item zonder telefoonnummer of mailadres (bv. "REIMER"), dan zoekt de app op
+     die naam in je Outlook-contactpersonen, in Outlook's personenlijst (mensen met wie je contact hebt)
+     en in je mail (afzender + nummer uit diens handtekening). Je krijgt maximaal drie voorstellen:
+     ✓ = gegevens in de tekst zetten (blijven staan), ✗ = dit voorstel niet meer tonen bij dit item.
+     Niets wordt zonder jouw ✓ in het item gezet. iPhone-contacten (iCloud) zijn voor een webapp
+     niet bereikbaar; alleen wat in Outlook/Exchange staat. */
+  var CONTACT_SCOPE = 'https://graph.microsoft.com/Contacts.Read https://graph.microsoft.com/People.Read';
+  var MAIL_SCOPE = 'https://graph.microsoft.com/Mail.ReadWrite';
+  var EIGEN_DOMEIN = /@visserinspecties\.nl$/i;
+  var scopeTok = {}, zoekCache = {};
+
+  function scopedToken(scope) {
+    var c = scopeTok[scope];
+    if (c && c.t && c.exp > Date.now() + 60000) return Promise.resolve(c.t);
+    if (c && c.fout && Date.now() - c.fout < 10 * 60000) return Promise.resolve(null);
+    if (!tok || !tok.refresh) return Promise.resolve(null);
+    return fetch(AUTHORITY + '/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: CFG.clientId, refresh_token: tok.refresh,
+        scope: scope + ' offline_access' }).toString()
+    }).then(function (r) { return r.json(); }).then(function (j) {
+      if (!j.access_token) { scopeTok[scope] = { fout: Date.now() }; return null; }   // nog geen toestemming
+      if (j.refresh_token) { tok.refresh = j.refresh_token; lsSet(TOK_KEY, tok); }
+      scopeTok[scope] = { t: j.access_token, exp: Date.now() + (j.expires_in || 3600) * 1000 };
+      return j.access_token;
+    }, function () { return null; });
+  }
+  function gget(t, pad, extraHeaders) {
+    return fetch(GRAPH + pad, { headers: Object.assign({ Authorization: 'Bearer ' + t }, extraHeaders || {}) })
+      .then(function (r) { return r.ok ? r.json() : { value: [] }; }, function () { return { value: [] }; });
+  }
+
+  var ACTIEWOORD = /^(bel|bellen|terugbellen|gebeld|mail|mailen|mailtje|afspraak|afspreken|whatsapp|appen|spreken|contact|met|over|en|van|voor|nog|even)$/i;
+  function zoekNaam(it) {
+    var eerste = String(it.text || '').trim().split('\n')[0].replace(/^✓ /, '').replace(/["<>(),:]/g, ' ');
+    var w = eerste.split(/\s+/).filter(function (x) { return x && !ACTIEWOORD.test(x) && /^[A-Za-zÀ-ÿ'\-]{2,}$/.test(x); });
+    return w.slice(0, 2).join(' ');
+  }
+  function heeftContact(t) {
+    t = String(t || '');
+    return RE_MAILADRES.test(t) || (t.match(RE_TEL) || []).some(function (x) { return !!telNummer(x); });
+  }
+  function moetZoeken(it) {
+    return !!(tok && !it.archived && catsVan(it).indexOf('mensen') > -1 && !heeftContact(it.text) && zoekNaam(it).length >= 2);
+  }
+  // Komen alle woorden van de naam voor in deze tekst (zonder hoofdletters/accenten)?
+  function past(naam, tekst) {
+    var h = norm(tekst);
+    return norm(naam).split(/\s+/).every(function (w) { return h.indexOf(w) > -1; });
+  }
+  function nummersUit(tekst) {
+    var uit = [];
+    (String(tekst || '').match(RE_TEL) || []).forEach(function (x) {
+      var n = telNummer(x); if (n && uit.indexOf(x.trim()) < 0) uit.push(x.trim());
+    });
+    return uit.slice(0, 2);
+  }
+
+  function zoekInContacten(naam) {
+    return scopedToken(CONTACT_SCOPE).then(function (t) {
+      if (!t) return { geenToestemming: true, lijst: [] };
+      var q = naam.split(' ')[0].replace(/'/g, "''");
+      var f = "startswith(givenName,'" + q + "') or startswith(surname,'" + q + "') or startswith(displayName,'" + q + "')";
+      var contacten = gget(t, '/me/contacts?$top=15&$select=displayName,emailAddresses,mobilePhone,businessPhones,homePhones,companyName&$filter=' + encodeURIComponent(f));
+      var personen = gget(t, '/me/people?$top=10&$select=displayName,scoredEmailAddresses,phones,companyName,personType&$search=' + encodeURIComponent('"' + naam + '"'));
+      return Promise.all([contacten, personen]).then(function (r) {
+        var lijst = [];
+        (r[0].value || []).forEach(function (c) {
+          var mail = ((c.emailAddresses || [])[0] || {}).address || '';
+          if (!past(naam, (c.displayName || '') + ' ' + mail)) return;
+          lijst.push({ naam: c.displayName, bedrijf: c.companyName, email: mail,
+            tels: [c.mobilePhone].concat(c.businessPhones || [], c.homePhones || []).filter(Boolean), bron: 'Outlook-contactpersonen' });
+        });
+        (r[1].value || []).forEach(function (p) {
+          if (p.personType && p.personType.class && p.personType.class !== 'Person') return;
+          var mail = ((p.scoredEmailAddresses || [])[0] || {}).address || '';
+          if (!past(naam, (p.displayName || '') + ' ' + mail)) return;
+          lijst.push({ naam: p.displayName, bedrijf: p.companyName, email: mail,
+            tels: (p.phones || []).map(function (x) { return x.number; }).filter(Boolean), bron: 'Outlook' });
+        });
+        return { lijst: lijst };
+      });
+    });
+  }
+
+  function zoekInMail(naam) {
+    return scopedToken(MAIL_SCOPE).then(function (t) {
+      if (!t) return { lijst: [] };
+      return gget(t, '/me/messages?$top=20&$select=from,toRecipients,receivedDateTime,uniqueBody&$search=' + encodeURIComponent('"' + naam + '"'),
+        { Prefer: 'outlook.body-content-type="text"' }).then(function (j) {
+        var lijst = [];
+        (j.value || []).forEach(function (m) {
+          var dat = new Date(m.receivedDateTime).toLocaleDateString('nl-NL', { day: 'numeric', month: 'short' });
+          var van = (m.from || {}).emailAddress || {};
+          if (van.address && !EIGEN_DOMEIN.test(van.address) && past(naam, (van.name || '') + ' ' + van.address)) {
+            // nummer uit hun eigen deel van de mail (uniqueBody = zonder de geciteerde eerdere mails, dus niet jouw handtekening)
+            lijst.push({ naam: van.name || van.address, email: van.address,
+              tels: nummersUit(((m.uniqueBody || {}).content) || ''), bron: 'mail van ' + dat });
+          }
+          (m.toRecipients || []).forEach(function (x) {
+            var a = x.emailAddress || {};
+            if (a.address && !EIGEN_DOMEIN.test(a.address) && past(naam, (a.name || '') + ' ' + a.address))
+              lijst.push({ naam: a.name || a.address, email: a.address, tels: [], bron: 'jouw mail van ' + dat });
+          });
+        });
+        return { lijst: lijst };
+      });
+    });
+  }
+
+  // Samenvoegen per mailadres (of naam), nummers bij elkaar; met nummer en uit contactpersonen eerst
+  function samenvoegen(lijsten) {
+    var map = {}, volgorde = [];
+    lijsten.forEach(function (k) {
+      var sl = (k.email || '').toLowerCase() || norm(k.naam);
+      var cur = map[sl];
+      if (!cur) { cur = map[sl] = { sleutel: sl, naam: k.naam, bedrijf: k.bedrijf || '', email: k.email || '', tels: [], bronnen: [] }; volgorde.push(sl); }
+      if (!cur.bedrijf && k.bedrijf) cur.bedrijf = k.bedrijf;
+      if ((k.naam || '').length > (cur.naam || '').length && !/@/.test(k.naam)) cur.naam = k.naam;
+      (k.tels || []).forEach(function (x) {
+        var n = telNummer(x); if (!n) return;
+        if (!cur.tels.some(function (y) { return telNummer(y) === n; })) cur.tels.push(x);
+      });
+      if (cur.bronnen.indexOf(k.bron) < 0) cur.bronnen.push(k.bron);
+    });
+    return volgorde.map(function (s) { return map[s]; }).sort(function (a, b) {
+      var sa = (a.tels.length ? 2 : 0) + (a.bronnen.join().indexOf('contactpersonen') > -1 ? 1 : 0);
+      var sb = (b.tels.length ? 2 : 0) + (b.bronnen.join().indexOf('contactpersonen') > -1 ? 1 : 0);
+      return sb - sa;
+    });
+  }
+
+  function zoekContact(naam) {
+    var sl = norm(naam);
+    if (!zoekCache[sl]) {
+      zoekCache[sl] = Promise.all([zoekInContacten(naam), zoekInMail(naam)]).then(function (r) {
+        return { kandidaten: samenvoegen(r[0].lijst.concat(r[1].lijst)), geenToestemming: !!r[0].geenToestemming };
+      }, function () { return { kandidaten: [], geenToestemming: false }; });
+    }
+    return zoekCache[sl];
+  }
+
+  function toonSuggesties(it) {
+    var el = $('itemSuggest'); el.innerHTML = '';
+    if (!moetZoeken(it)) return;
+    var naam = zoekNaam(it), id = it.id;
+    var kop = document.createElement('p'); kop.className = 'kop';
+    kop.textContent = 'Gegevens van ' + naam + ' zoeken in Outlook en je mail…';
+    el.appendChild(kop);
+    zoekContact(naam).then(function (res) {
+      if (currentId !== id || !itemDlg.open) return;
+      el.innerHTML = '';
+      var afg = it.afgewezen || [];
+      var kand = res.kandidaten.filter(function (k) { return afg.indexOf(k.sleutel) < 0; }).slice(0, 3);
+      var kp = document.createElement('p'); kp.className = 'kop';
+      kp.textContent = kand.length ? 'Gevonden voor "' + naam + '" — klopt dit?' : 'Geen gegevens gevonden voor "' + naam + '".';
+      el.appendChild(kp);
+      kand.forEach(function (k) {
+        var rij = document.createElement('div'); rij.className = 'kand';
+        var g = document.createElement('span'); g.className = 'gegevens';
+        // nummers onbreekbaar tonen (niet "06-" op de ene en de rest op de volgende regel)
+        var telsZicht = k.tels.map(function (x) { return x.replace(/-/g, '\u2011').replace(/ /g, '\u00a0'); }).join(' / ');
+        g.appendChild(document.createTextNode([k.naam + (k.bedrijf ? ' (' + k.bedrijf + ')' : ''), telsZicht, k.email].filter(Boolean).join(' · ')));
+        var b = document.createElement('span'); b.className = 'bron'; b.textContent = 'uit ' + k.bronnen.join(', ');
+        g.appendChild(b);
+        var ja = document.createElement('button'); ja.className = 'ja'; ja.type = 'button'; ja.textContent = '✓'; ja.setAttribute('aria-label', 'Klopt, in het item zetten');
+        ja.addEventListener('click', function () {
+          var regels = [k.naam + (k.bedrijf ? ' (' + k.bedrijf + ')' : ''), k.tels.join(' / '), k.email].filter(Boolean);
+          it.text = String(it.text).replace(/\s+$/, '') + '\n' + regels.join('\n');
+          touch(it); save(); render(); showItem(it);
+        });
+        var nee = document.createElement('button'); nee.className = 'nee'; nee.type = 'button'; nee.textContent = '✗'; nee.setAttribute('aria-label', 'Klopt niet, niet meer tonen');
+        nee.addEventListener('click', function () {
+          it.afgewezen = afg.concat(k.sleutel);
+          touch(it); save(); toonSuggesties(it);
+        });
+        rij.appendChild(g); rij.appendChild(ja); rij.appendChild(nee);
+        el.appendChild(rij);
+      });
+      if (res.geenToestemming) {
+        var l = document.createElement('button'); l.className = 'link'; l.type = 'button';
+        l.textContent = 'Ook je Outlook-contactpersonen doorzoeken (één keer toestemming geven)';
+        l.addEventListener('click', function () { login(CONTACT_SCOPE + ' ' + MAIL_SCOPE); });
+        el.appendChild(l);
+      }
+    });
   }
 
   /* ---------- de sync zelf ---------- */
