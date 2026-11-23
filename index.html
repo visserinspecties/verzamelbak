@@ -340,6 +340,23 @@
   }
   #itemSuggest .kand button.ja { color: #2e7d32; }
   #itemSuggest .link { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 8px 0; cursor: pointer; text-decoration: underline; }
+  /* pennetje achter de naam: contactpersoon in Outlook aanpassen (klein icoon, groot tikvlak) */
+  #itemSuggest .kand button.pen {
+    width: 40px; height: 34px; margin: -8px -6px -8px 0; vertical-align: middle;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #itemSuggest .kand button.pen svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+  #itemSuggest .bewerk { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px 12px; margin-top: 6px; color: var(--ink); }
+  #itemSuggest .bewerk .titel { margin: 0 0 4px; font-size: 13px; }
+  #itemSuggest .bewerk label { display: block; font-size: 11px; color: var(--ink-soft); margin-top: 8px; }
+  #itemSuggest .bewerk input {
+    width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; /* voorkomt inzoomen op iPhone */
+    color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; margin-top: 2px;
+  }
+  #itemSuggest .bewerk .twee { display: flex; gap: 8px; }
+  #itemSuggest .bewerk .twee > div { flex: 1; min-width: 0; }
+  #itemSuggest .bewerk .melding { font-size: 12px; margin: 8px 0 0; color: var(--accent); }
+  #itemSuggest .bewerk .melding:empty { display: none; }
 
   /* Vensters */
   dialog {
@@ -1428,7 +1445,7 @@
       if (!t) return { geenToestemming: true, lijst: [] };
       var q = naam.split(' ')[0].replace(/'/g, "''");
       var f = "startswith(givenName,'" + q + "') or startswith(surname,'" + q + "') or startswith(displayName,'" + q + "')";
-      var contacten = gget(t, '/me/contacts?$top=15&$select=displayName,emailAddresses,mobilePhone,businessPhones,homePhones,companyName&$filter=' + encodeURIComponent(f));
+      var contacten = gget(t, '/me/contacts?$top=15&$select=id,displayName,givenName,surname,emailAddresses,mobilePhone,businessPhones,homePhones,companyName&$filter=' + encodeURIComponent(f));
       var personen = gget(t, '/me/people?$top=10&$select=displayName,scoredEmailAddresses,phones,companyName,personType&$search=' + encodeURIComponent('"' + naam + '"'));
       return Promise.all([contacten, personen]).then(function (r) {
         var lijst = [];
@@ -1436,7 +1453,8 @@
           var mail = ((c.emailAddresses || [])[0] || {}).address || '';
           if (!past(naam, (c.displayName || '') + ' ' + mail)) return;
           lijst.push({ naam: c.displayName, bedrijf: c.companyName, email: mail,
-            tels: [c.mobilePhone].concat(c.businessPhones || [], c.homePhones || []).filter(Boolean), bron: 'Outlook-contactpersonen' });
+            tels: [c.mobilePhone].concat(c.businessPhones || [], c.homePhones || []).filter(Boolean), bron: 'Outlook-contactpersonen',
+            contact: c });   // het echte contact, om met het pennetje aan te passen
         });
         (r[1].value || []).forEach(function (p) {
           if (p.personType && p.personType.class && p.personType.class !== 'Person') return;
@@ -1483,6 +1501,7 @@
       var cur = map[sl];
       if (!cur) { cur = map[sl] = { sleutel: sl, naam: k.naam, bedrijf: k.bedrijf || '', email: k.email || '', tels: [], bronnen: [] }; volgorde.push(sl); }
       if (!cur.bedrijf && k.bedrijf) cur.bedrijf = k.bedrijf;
+      if (!cur.contact && k.contact) cur.contact = k.contact;
       if ((k.naam || '').length > (cur.naam || '').length && !/@/.test(k.naam)) cur.naam = k.naam;
       (k.tels || []).forEach(function (x) {
         var n = telNummer(x); if (!n) return;
@@ -1507,9 +1526,141 @@
     return zoekCache[sl];
   }
 
+  /* ---------- contactpersoon aanpassen in Outlook (pennetje achter de naam) ----------
+     Bestaand contact: telefoon, e-mail, naam en bedrijf aanpassen (PATCH). Gevonden in mail maar nog
+     geen contactpersoon: als nieuw contact opslaan (POST). Hiervoor is één keer extra toestemming nodig
+     (Contacts.ReadWrite). Heb je die nog niet, dan onthoudt de app wat je invulde, ga je even naar
+     Microsoft, en wordt het na terugkomst vanzelf opgeslagen. */
+  var CONTACT_SCHRIJF = 'https://graph.microsoft.com/Contacts.ReadWrite';
+  var WACHT_KEY = 'verzamelbak.contactwacht';
+  var laatsteMelding = null;   // { id, tekst } — kort tonen bij het item na opslaan
+
+  function contactSchrijven(id, body) {
+    return scopedToken(CONTACT_SCHRIJF).then(function (t) {
+      if (!t) return { toestemming: false };
+      return fetch(GRAPH + '/me/contacts' + (id ? '/' + encodeURIComponent(id) : ''), {
+        method: id ? 'PATCH' : 'POST',
+        headers: { Authorization: 'Bearer ' + t, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        if (!r.ok) throw new Error('Outlook gaf fout ' + r.status);
+        return { ok: true };
+      });
+    });
+  }
+
+  function isMobiel(x) { return /^(\+316|00316|06)/.test(String(x || '').replace(/[\s\-().]/g, '')); }
+
+  // Formulierwaarden -> Graph-velden. Alleen het eerste nummer/adres wordt aangepast; extra's blijven staan.
+  function contactBody(c, vastVeld, v) {
+    var voor = v.voornaam, achter = v.achternaam, dn = (voor + ' ' + achter).trim();
+    var b = { givenName: voor || null, surname: achter || null, companyName: v.bedrijf || null, mobilePhone: v.mobiel || null };
+    var oudeNaam = c ? ((c.givenName || '') + ' ' + (c.surname || '')).trim() : null;
+    if (!c || dn !== oudeNaam) b.displayName = dn || v.bedrijf || v.email || null;
+    var vast = ((c && c[vastVeld]) || []).slice(1);
+    if (v.vast) vast.unshift(v.vast);
+    b[vastVeld] = vast;
+    var mails = ((c && c.emailAddresses) || []).slice(1);
+    if (v.email) mails.unshift({ address: v.email, name: dn || v.email });
+    b.emailAddresses = mails;
+    if (!c) Object.keys(b).forEach(function (s) {   // nieuw contact: lege velden gewoon weglaten
+      if (b[s] == null || (Array.isArray(b[s]) && !b[s].length)) delete b[s];
+    });
+    return b;
+  }
+
+  function contactFormulier(it, naam, k) {
+    var c = k.contact || null;
+    var vastVeld = c && !(c.businessPhones || []).length && (c.homePhones || []).length ? 'homePhones' : 'businessPhones';
+    var voor = c ? c.givenName || '' : '', achter = c ? c.surname || '' : '';
+    if (!voor && !achter) {
+      var d = String(c ? c.displayName || '' : (/@/.test(k.naam || '') ? '' : k.naam || '')).trim().split(/\s+/);
+      voor = d.shift() || ''; achter = d.join(' ');
+    }
+    var start = c ? {
+      mobiel: c.mobilePhone || '', vast: (c[vastVeld] || [])[0] || '', email: ((c.emailAddresses || [])[0] || {}).address || '', bedrijf: c.companyName || ''
+    } : {
+      mobiel: k.tels.filter(isMobiel)[0] || '', vast: k.tels.filter(function (x) { return !isMobiel(x); })[0] || '', email: k.email || '', bedrijf: k.bedrijf || ''
+    };
+
+    var f = document.createElement('div'); f.className = 'bewerk';
+    var tt = document.createElement('p'); tt.className = 'titel';
+    tt.textContent = c ? 'Contactpersoon aanpassen in Outlook' : 'Opslaan als nieuwe contactpersoon in Outlook';
+    f.appendChild(tt);
+    var inp = {};
+    function veld(ouder, sleutel, label, waarde, type, ac) {
+      var w = document.createElement('div');
+      var l = document.createElement('label'); l.textContent = label;
+      var i = document.createElement('input'); i.type = type || 'text'; i.value = waarde; i.autocomplete = ac || 'off';
+      if (type === 'tel') i.inputMode = 'tel';
+      l.appendChild(i); w.appendChild(l); ouder.appendChild(w); inp[sleutel] = i;
+    }
+    var r1 = document.createElement('div'); r1.className = 'twee'; f.appendChild(r1);
+    veld(r1, 'voornaam', 'Voornaam', voor, 'text', 'given-name');
+    veld(r1, 'achternaam', 'Achternaam', achter, 'text', 'family-name');
+    veld(f, 'bedrijf', 'Bedrijf', start.bedrijf, 'text', 'organization');
+    var r2 = document.createElement('div'); r2.className = 'twee'; f.appendChild(r2);
+    veld(r2, 'mobiel', 'Mobiel', start.mobiel, 'tel');
+    veld(r2, 'vast', vastVeld === 'homePhones' ? 'Telefoon thuis' : 'Telefoon vast', start.vast, 'tel');
+    veld(f, 'email', 'E-mail', start.email, 'email', 'email');
+    var melding = document.createElement('p'); melding.className = 'melding'; f.appendChild(melding);
+
+    var rij = document.createElement('div'); rij.className = 'row';
+    var terug = document.createElement('button'); terug.type = 'button'; terug.className = 'btn quiet'; terug.textContent = 'Annuleer';
+    var ok = document.createElement('button'); ok.type = 'button'; ok.className = 'btn primary'; ok.textContent = 'Opslaan in Outlook';
+    rij.appendChild(terug); rij.appendChild(ok); f.appendChild(rij);
+    terug.addEventListener('click', function () { toonSuggesties(it); });
+
+    var wachtOpToestemming = null;
+    ok.addEventListener('click', function () {
+      if (wachtOpToestemming) { lsSet(WACHT_KEY, wachtOpToestemming); login(CONTACT_SCHRIJF + ' ' + CONTACT_SCOPE + ' ' + MAIL_SCOPE); return; }
+      var v = {};
+      Object.keys(inp).forEach(function (s) { v[s] = inp[s].value.trim(); });
+      if (!v.voornaam && !v.achternaam && !v.bedrijf) { melding.textContent = 'Vul minstens een naam of bedrijf in.'; return; }
+      var body = contactBody(c, vastVeld, v);
+      ok.disabled = true; ok.textContent = 'Bezig…'; melding.textContent = '';
+      contactSchrijven(c && c.id, body).then(function (r) {
+        if (r.toestemming === false) {
+          wachtOpToestemming = { t: Date.now(), itemId: it.id, naam: naam, id: c && c.id, body: body };
+          melding.textContent = 'Eén keer toestemming nodig om je contactpersonen aan te passen. Je gaat even naar Microsoft; na terugkomst wordt dit vanzelf opgeslagen.';
+          ok.disabled = false; ok.textContent = 'Toestemming geven';
+          return;
+        }
+        delete zoekCache[norm(naam)];
+        laatsteMelding = { id: it.id, tekst: c ? 'Aangepast in Outlook ✓' : 'Opgeslagen in je contactpersonen ✓' };
+        if (currentId === it.id && itemDlg.open) toonSuggesties(it);
+      }, function (e) {
+        melding.textContent = 'Opslaan lukte niet: ' + e.message;
+        ok.disabled = false; ok.textContent = 'Opslaan in Outlook';
+      });
+    });
+    return f;
+  }
+
+  // Na terugkomst van de toestemmingspagina: wat je had ingevuld alsnog opslaan en het item weer openen
+  function wachtendContact() {
+    var w = lsGet(WACHT_KEY);
+    if (!w) return;
+    lsSet(WACHT_KEY, null);
+    if (!tok || Date.now() - w.t > 30 * 60000) return;
+    contactSchrijven(w.id, w.body).then(function (r) {
+      laatsteMelding = { id: w.itemId, tekst: r.toestemming === false ? 'Geen toestemming gekregen; niets aangepast in Outlook.' : (w.id ? 'Aangepast in Outlook ✓' : 'Opgeslagen in je contactpersonen ✓') };
+    }, function (e) {
+      laatsteMelding = { id: w.itemId, tekst: 'Opslaan in Outlook lukte niet: ' + e.message };
+    }).then(function () {
+      delete zoekCache[norm(w.naam || '')];
+      if (find(w.itemId)) openItem(w.itemId);
+    });
+  }
+
   function toonSuggesties(it) {
     var el = $('itemSuggest'); el.innerHTML = '';
-    if (!moetZoeken(it)) return;
+    var melding = laatsteMelding && laatsteMelding.id === it.id ? laatsteMelding.tekst : '';
+    laatsteMelding = null;
+    if (!moetZoeken(it)) {
+      if (melding) { var m0 = document.createElement('p'); m0.className = 'kop'; m0.textContent = melding; el.appendChild(m0); }
+      return;
+    }
     var naam = zoekNaam(it), id = it.id;
     var kop = document.createElement('p'); kop.className = 'kop';
     kop.textContent = 'Gegevens van ' + naam + ' zoeken in Outlook en je mail…';
@@ -1520,7 +1671,8 @@
       var afg = it.afgewezen || [];
       var kand = res.kandidaten.filter(function (k) { return afg.indexOf(k.sleutel) < 0; }).slice(0, 3);
       var kp = document.createElement('p'); kp.className = 'kop';
-      kp.textContent = kand.length ? 'Gevonden voor "' + naam + '" — klopt dit?' : 'Geen gegevens gevonden voor "' + naam + '".';
+      kp.textContent = (melding ? melding + ' · ' : '') +
+        (kand.length ? 'Gevonden voor "' + naam + '" — klopt dit?' : 'Geen gegevens gevonden voor "' + naam + '".');
       el.appendChild(kp);
       kand.forEach(function (k) {
         var rij = document.createElement('div'); rij.className = 'kand';
@@ -1529,7 +1681,14 @@
         var telsZicht = k.tels.map(function (x) { return x.replace(/-/g, '\u2011').replace(/ /g, '\u00a0'); }).join(' / ');
         var naamZicht = /@/.test(k.naam || '') ? (k.bedrijf || '') : k.naam + (k.bedrijf ? ' (' + k.bedrijf + ')' : '');
         g.appendChild(document.createTextNode([naamZicht, telsZicht, k.email].filter(Boolean).join(' · ')));
-        var b = document.createElement('span'); b.className = 'bron'; b.textContent = 'uit ' + k.bronnen.join(', ');
+        // pennetje: dit contact in Outlook aanpassen (of als nieuw contact opslaan als het er nog niet in staat)
+        var pen = document.createElement('button'); pen.className = 'pen'; pen.type = 'button';
+        pen.setAttribute('aria-label', k.contact ? 'Contactpersoon aanpassen in Outlook' : 'Opslaan als contactpersoon in Outlook');
+        pen.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2 2 0 0 1 3 0l0 0a2 2 0 0 1 0 3L8 19z"/><path d="M14.5 6.5l3 3"/></svg>';
+        pen.addEventListener('click', function () { el.replaceChild(contactFormulier(it, naam, k), rij); });
+        g.appendChild(pen);
+        var b = document.createElement('span'); b.className = 'bron';
+        b.textContent = 'uit ' + k.bronnen.join(', ') + (k.contact ? '' : ' · nog niet in je contactpersonen');
         g.appendChild(b);
         var ja = document.createElement('button'); ja.className = 'ja'; ja.type = 'button'; ja.textContent = '✓'; ja.setAttribute('aria-label', 'Klopt, in het item zetten');
         ja.addEventListener('click', function () {
@@ -1643,6 +1802,7 @@
   handleRedirect().then(function () {
     setStatus(tok ? 'idle' : 'off');
     if (lastError) { syncBtn.className = 'err'; }
+    wachtendContact();
     return sync();
   });
 
