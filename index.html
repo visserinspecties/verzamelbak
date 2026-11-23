@@ -272,7 +272,7 @@
     left: 50%; transform: translateX(-50%);
     top: env(safe-area-inset-top);
     height: 56px;
-    display: flex; align-items: center;
+    display: flex; align-items: center; gap: 6px;
     padding: 0 6px;
     background: var(--bg);
     border-radius: 0 0 22px 22px;
@@ -280,10 +280,10 @@
   }
   #catBar.verborgen { display: none; }
   .catBtn {
-    width: 40px; height: 56px;
+    width: 50px; height: 56px;            /* groot tikvlak voor de iPhone */
     display: flex; align-items: center; justify-content: center;
     background: none; border: 0; padding: 0; cursor: pointer;
-    font-size: 19px; line-height: 1;
+    font-size: 23px; line-height: 1;
     filter: grayscale(1); opacity: .45;
     position: relative;
   }
@@ -296,7 +296,7 @@
   #catInfo {
     position: fixed;
     left: 50%; transform: translateX(-50%);
-    top: calc(env(safe-area-inset-top) + 50px);
+    top: calc(env(safe-area-inset-top) + 52px);
     display: none;
     font: inherit; font-size: 12px;
     color: var(--accent);
@@ -309,8 +309,9 @@
   #catInfo.open { display: block; }
   /* In het item-venster: bij welke categorie hoort dit */
   .catline { display: flex; align-items: center; gap: 2px; margin-top: 10px; font-size: 12px; color: var(--ink-soft); flex-wrap: wrap; }
-  .catline .catBtn { width: 40px; height: 40px; font-size: 18px; }
-  .catline .catBtn.on::after { bottom: 3px; }
+  .catline { gap: 6px; }
+  .catline .catBtn { width: 48px; height: 48px; font-size: 22px; }
+  .catline .catBtn.on::after { bottom: 4px; }
   .catline .auto { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 10px 6px; cursor: pointer; text-decoration: underline; }
   .catline .autotxt { padding: 0 6px; }
   /* telefoonnummer in de tekst: tik = bellen */
