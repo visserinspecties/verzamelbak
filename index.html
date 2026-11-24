@@ -568,12 +568,185 @@
   var cloud = $('cloud');
 
   // Onderwerp in de wolk: maximaal twee woorden.
-  // Staat er een eerste regel, dan geldt die als onderwerp; anders de eerste twee woorden.
-  function shortLabel(text) {
+  // Zelf ingetypt: de eerste regel geldt als onderwerp (de eerste twee woorden daarvan).
+  // Via de deelknop of doorgestuurde mail: een slim onderwerp (zie slimLabel hieronder).
+  function kort(label) { return label.length > 28 ? label.slice(0, 26) + '…' : label; }
+  function shortLabel(item) {
+    var text = String(item.text || '');
+    if (item.bron === 'deelknop' || item.bron === 'mail') { var s = slimLabel(text); if (s) return kort(s); }
     var first = text.trim().split(/\n/)[0].trim().replace(/^✓ /, '');
-    var words = first.split(/\s+/).filter(Boolean);
-    var label = words.slice(0, 2).join(' ');
-    return label.length > 28 ? label.slice(0, 26) + '…' : label;
+    return kort(first.split(/\s+/).filter(Boolean).slice(0, 2).join(' '));
+  }
+
+  /* ---------- slim onderwerp voor de deelknop en doorgestuurde mail ----------
+     Niet blind de eerste twee woorden, maar één of twee woorden die ertoe doen:
+     een persoon, bedrijf of straat, liefst met de actie erbij ("Reimer bellen", "Heilleweg offerte").
+     Lukt dat niet, dan de twee meest zeggende woorden (geen "graag", "vraag", "onderwerp" enz.).
+     Klopt het niet? Bewerk het item en zet bovenaan een regel van één of twee woorden:
+     die geldt dan als onderwerp. */
+  var STOPW = ('de het een en of maar want dus dan als om te ten ter in op aan van voor met naar bij uit over onder tot door ' +
+    'zonder tegen na sinds tussen ik je jij u hij zij ze we wij jullie hun hen mij me mijn jouw uw zijn haar ons onze die dat ' +
+    'deze dit wat wie waar wanneer hoe waarom welke welk er hier daar niet geen wel ook nog al even graag misschien moet moeten ' +
+    'kan kunnen wil willen zal zullen ga gaan gaat doe doen is was waren ben bent heb hebt heeft hebben had hadden worden wordt ' +
+    'werd zou zouden mag mogen kun kunt komt komen kom ja nee ok oké oke dank bedankt groet groeten vriendelijke hartelijke mvg ' +
+    'gr beste hoi hallo hey hi dag geachte goedemorgen goedemiddag goedenavond lieve morgen vandaag gisteren straks later ' +
+    'vanavond vanmiddag vanochtend overmorgen week weken maand maanden jaar maandag dinsdag woensdag donderdag vrijdag zaterdag ' +
+    'zondag januari februari maart april mei juni juli augustus september oktober november december onderwerp bericht berichtje ' +
+    'vraag vragen vraagje info informatie zie bijlage bijlagen bijgevoegd hierbij re fw fwd doorst wg tr aub svp alvast nogmaals ' +
+    'erg heel veel meer minder weinig paar ff iets niets alles alle elke elk goed goede nieuwe nieuw oud oude lang kort snel ' +
+    'binnenkort zo toch echt eigenlijk sowieso weer nu keer tijd ding dingen zaak zaken punt punten hele mooi leuk fijn prima ' +
+    'net eens wellicht mogelijk zeker volgens natuurlijk verder samen tot hem kijk denk weet laat zeg zegt mee terug uur ' +
+    'verzonden iphone ipad outlook android sent from my john visser inspecties visserinspecties').split(' ');
+  var STOPSET = {}; STOPW.forEach(function (w) { STOPSET[w] = 1; });
+  var GROETW = /^(beste|hoi|hallo|hey|hi|dag|geachte|lieve|goedemorgen|goedemiddag|goedenavond)$/i;
+  var AFKORT = /^(EPA|BTW|KVK|PDF|NTA|BRL|BCRG|CO2|BV|VVE|NV|VOF|WOZ|APK|ING|ABN|KPN|ANWB|NS|URL|WWW|HTTP|HTTPS|OK|AUB|SVP|MVG|FYI|ASAP)$/;
+  var ACTIE = { bel: 'bellen', bellen: 'bellen', terugbellen: 'terugbellen', mail: 'mailen', mailen: 'mailen', mailtje: 'mailen',
+    app: 'appen', appen: 'appen', appje: 'appen', whatsapp: 'appen', whatsappen: 'appen', offerte: 'offerte', offertes: 'offerte',
+    factuur: 'factuur', facturen: 'factuur', factureren: 'factureren', betalen: 'betalen', betaal: 'betalen', afspraak: 'afspraak',
+    afspreken: 'afspraak', inplannen: 'inplannen', plannen: 'inplannen', opname: 'opname', bestellen: 'bestellen', bestel: 'bestellen',
+    opsturen: 'opsturen', sturen: 'sturen', stuur: 'sturen', versturen: 'versturen', nakijken: 'nakijken', checken: 'checken',
+    check: 'checken', controleren: 'controleren', aanvragen: 'aanvragen', regelen: 'regelen', ophalen: 'ophalen', langs: 'langsgaan',
+    langsgaan: 'langsgaan', opzeggen: 'opzeggen', verlengen: 'verlengen', declareren: 'declareren', reageren: 'reageren',
+    antwoorden: 'antwoorden', beantwoorden: 'antwoorden', terugkoppelen: 'terugkoppelen', overleggen: 'overleg', overleg: 'overleg',
+    bespreken: 'bespreken', kopen: 'kopen', koop: 'kopen', retour: 'retour', terugsturen: 'terugsturen', tekenen: 'tekenen',
+    ondertekenen: 'tekenen', uploaden: 'uploaden', printen: 'printen', lezen: 'lezen', lees: 'lezen', bekijken: 'bekijken',
+    uitzoeken: 'uitzoeken', zoeken: 'uitzoeken', repareren: 'repareren', aanmelden: 'aanmelden', afmelden: 'afmelden',
+    inschrijven: 'inschrijven', boeken: 'boeken', reserveren: 'reserveren', annuleren: 'annuleren', herinneren: 'herinneren',
+    herinnering: 'herinnering', aanmaning: 'aanmaning', keuring: 'keuring', inspectie: 'inspectie' };
+  var STRAAT = /^[A-ZÀ-Ýa-zà-ÿ][a-zà-ÿ\-]*(straat|weg|dijk|laan|plein|gracht|kade|singel|hof|daal|boulevard|dreef|steeg|pad|park|baan|veld|polder|haven|kanaal|markt|ring)$/i;
+  var BEDRIJF = /^(b\.?v\.?|v\.?o\.?f\.?|n\.?v\.?|holding|groep|group|makelaardij|makelaars|bouw|installatietechniek|vastgoed|woningcorporatie)$/i;
+  var GRATIS_MAIL = /^(gmail|hotmail|outlook|live|icloud|me|yahoo|ziggo|kpn|kpnmail|planet|home|xs4all|hetnet|casema|telfort|upcmail|chello|online|zeelandnet|visserinspecties)$/i;
+
+  function hoofdletter(w) { return w.charAt(0).toUpperCase() + w.slice(1); }
+  function naamVanDomein(host) {
+    var delen = host.toLowerCase().replace(/^www\d?\./, '').split('.');
+    var stam = delen.length > 1 ? delen[delen.length - 2] : delen[0];
+    if (!stam || GRATIS_MAIL.test(stam) || stam.length < 2) return '';
+    stam = stam.split('-')[0];
+    return stam.length > 18 ? '' : hoofdletter(stam);
+  }
+
+  function slimLabel(text) {
+    var t = String(text || '').replace(/\r/g, '').replace(/^✓ /gm, '').trim();
+    if (!t) return '';
+    var regels = t.split('\n').map(function (r) { return r.trim(); }).filter(Boolean)
+      .filter(function (r) { return !/^(verzonden (vanaf|met)|sent from|outlook voor|get outlook)/i.test(r); });
+    if (!regels.length) return '';
+
+    // Bijlage (foto, screenshot, pdf) via de deelknop
+    var bijl = /^📎\s*(.+)$/.exec(regels[0]);
+    if (bijl) {
+      var naam = bijl[1].replace(/\.[a-z0-9]{2,5}$/i, '');
+      if (/^(img|image|photo|foto|dsc|pxl|heic)[\s_\-]?\d/i.test(naam) || /^\d[\d_\-\s]*$/.test(naam)) return '📎 Foto';
+      if (/^(screenshot|schermafbeelding|scherm|screen)/i.test(naam)) return '📎 Screenshot';
+      var sub = slimLabel(naam.replace(/[_\-]+/g, ' '));
+      return '📎 ' + (sub || 'Bijlage');
+    }
+
+    // Zelf al een kort onderwerp bovenaan gezet (1 of 2 woorden, met tekst eronder)? Dan geldt dat.
+    var w1 = regels[0].split(/\s+/);
+    if (regels.length > 1 && w1.length <= 2 && !/^https?:\/\//i.test(regels[0]) &&
+        !GROETW.test(w1[0].replace(/[,!.]$/, '')) && !/[,:]$/.test(regels[0]) && !STOPSET[w1[0].toLowerCase()]) return regels[0];
+
+    var alles = regels.slice(0, 12).join('\n').slice(0, 1500);
+
+    // Alleen een link: de naam van de site, plus een zeggend woord uit het adres
+    var link = /^(https?:\/\/)?([a-z0-9\-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(regels[0]) && regels.length === 1 ? regels[0] : null;
+    if (link) {
+      var m = /^(?:https?:\/\/)?([^\/?#]+)([^?#]*)/i.exec(link);
+      var site = naamVanDomein(m[1]) || m[1].replace(/^www\./, '');
+      var slug = (m[2] || '').split(/[\/\-_.+]+/).filter(function (x) {
+        return x.length >= 4 && !/\d/.test(x) && !STOPSET[x.toLowerCase()] && !/^(html?|php|aspx?|index|www|nl|com|nieuws|artikel|article|news|koop|huur|detail|product|products|item|page|pagina|watch)$/i.test(x);
+      });
+      var beste = slug.sort(function (a, b) {
+        return (STRAAT.test(b) ? 1 : 0) - (STRAAT.test(a) ? 1 : 0) || b.length - a.length;   // straatnaam eerst
+      })[0];
+      return beste ? site + ' ' + hoofdletter(beste.toLowerCase()) : site;
+    }
+
+    // Woorden doorlopen, per zin, met plek en context
+    var kand = [];          // { tekst, score, pos, soort }
+    var actie = null, actiePos = 1e9, pos = 0;
+    function voegToe(tekst, score, soort) {
+      var k = tekst.toLowerCase();
+      for (var i = 0; i < kand.length; i++) {
+        if (kand[i].tekst.toLowerCase() === k) { kand[i].score = Math.max(kand[i].score, score) + 0.5; return; }
+      }
+      kand.push({ tekst: tekst, score: score, pos: pos, soort: soort });
+    }
+
+    // Bedrijf of persoon uit een mailadres of weblink in de tekst
+    (alles.match(/[^\s@<>"(]+@([^\s@<>")]+\.[a-z]{2,})/gi) || []).forEach(function (adres) {
+      var b = naamVanDomein(adres.split('@')[1]); if (b) voegToe(b, 3.5, 'bedrijf');
+    });
+
+    alles.split(/[.!?:;]\s+|\n/).forEach(function (zin) {
+      var ruw = zin.split(/\s+/).filter(Boolean);
+      var w = ruw.map(function (x) { return x.replace(/^[^\wÀ-ÿ]+|[^\wÀ-ÿ.]+$/g, '').replace(/\.$/, ''); });
+      w.forEach(function (woord, i) {
+        pos++;
+        if (!woord || /^https?:/i.test(ruw[i]) || /@/.test(woord)) return;
+        var laag = woord.toLowerCase();
+        var vorige = i > 0 ? w[i - 1] : '', volgende = w[i + 1] || '';
+
+        if (ACTIE[laag] && pos < actiePos) { actie = ACTIE[laag]; actiePos = pos; }
+        if (STOPSET[laag] || ACTIE[laag]) return;
+        if (/^\d/.test(woord) || woord.length < 2) return;
+
+        // Straat (vaak het project): Heilleweg, Annastraat
+        if (STRAAT.test(woord) && woord.length >= 6) { voegToe(hoofdletter(laag), 4, 'straat'); return; }
+
+        // Bedrijf: "Peters Bouw B.V." -> woorden vóór B.V./Bouw/Holding
+        if (BEDRIJF.test(volgende) && /^[A-ZÀ-Ý]/.test(woord)) {
+          var bn = woord;
+          if (i > 0 && /^[A-ZÀ-Ý]/.test(vorige) && !STOPSET[vorige.toLowerCase()]) {
+            bn = vorige + ' ' + woord;
+            kand = kand.filter(function (k) { return k.tekst !== vorige; });   // "Peters" los weghalen, "Peters Bouw" blijft
+          }
+          voegToe(bn, 4.5, 'bedrijf'); return;
+        }
+
+        // Naam in HOOFDLETTERS (REIMER), maar geen afkorting als EPA of BTW
+        if (/^[A-ZÀ-Ý]{3,}$/.test(woord) && !AFKORT.test(woord)) { voegToe(hoofdletter(laag), 3, 'persoon'); return; }
+
+        if (/^[A-ZÀ-Ý][a-zà-ÿ'’\-]+$/.test(woord)) {
+          var score = i === 0 ? 1.5 : 3;                                    // eerste woord van een zin: zwakker
+          if (GROETW.test(vorige)) score = 5;                               // "Beste Reimer,"
+          if (ACTIE[(vorige || '').toLowerCase()] || ACTIE[(volgende || '').toLowerCase()]) score += 2.5;   // "bel Reimer" / "Reimer bellen"
+          if (/^(met|van|aan|voor|bij)$/i.test(vorige)) score += 0.5;       // "afspraak met Reimer"
+          voegToe(woord, score, 'persoon');
+          return;
+        }
+
+        // Gewoon woord: telt alleen als reserve, langere woorden zeggen meestal meer
+        if (woord.length >= 5 && /^[a-zà-ÿ][a-zà-ÿ\-]+$/.test(woord)) voegToe(laag, Math.min(woord.length, 12) / 10, 'woord');
+      });
+    });
+
+    var entiteiten = kand.filter(function (k) { return k.soort !== 'woord' && k.score >= 1.5; })
+      .sort(function (a, b) { return b.score - a.score || a.pos - b.pos; });
+    var woorden = kand.filter(function (k) { return k.soort === 'woord'; })
+      .sort(function (a, b) { return b.score - a.score || a.pos - b.pos; });
+
+    var e = entiteiten[0];
+    if (e) {
+      var naamDeel = e.soort === 'persoon' ? e.tekst.split(' ')[0] : e.tekst;
+      if (actie && naamDeel.split(' ').length === 1) return naamDeel + ' ' + actie;
+      if (naamDeel.split(' ').length === 1 && entiteiten[1] && entiteiten[1].score >= 3) {
+        // Twee sterke namen, bv. persoon + straat: "Reimer Heilleweg" (in de volgorde van de tekst)
+        var twee = [e, entiteiten[1]].sort(function (a, b) { return a.pos - b.pos; });
+        if (twee[1].tekst.split(' ').length === 1) return twee[0].tekst.split(' ')[0] + ' ' + twee[1].tekst;
+      }
+      return naamDeel;
+    }
+    if (actie && woorden[0]) return hoofdletter(woorden[0].tekst) + ' ' + actie;
+    if (woorden.length >= 2) {
+      var tw = woorden.slice(0, 2).sort(function (a, b) { return a.pos - b.pos; });
+      return hoofdletter(tw[0].tekst) + ' ' + tw[1].tekst;
+    }
+    if (woorden[0]) return hoofdletter(woorden[0].tekst) + (actie ? ' ' + actie : '');
+    if (actie) return hoofdletter(actie);
+    return '';
   }
 
   // Deadline ('JJJJ-MM-DD') netjes tonen, bv. "24 okt". Geeft ook aan of het vandaag of al voorbij is.
@@ -707,7 +880,7 @@
           b.className = 'word w' + item.w;
           var lbl = document.createElement('span');
           lbl.className = 'lbl';
-          lbl.textContent = shortLabel(item.text);
+          lbl.textContent = shortLabel(item);
           if (item.hl) {
             // Per item een eigen, vaste "slordige" vorm
             b.classList.add('hl');
