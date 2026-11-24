@@ -573,6 +573,8 @@
   function kort(label) { return label.length > 28 ? label.slice(0, 26) + '…' : label; }
   function shortLabel(item) {
     var text = String(item.text || '');
+    // Oudere items uit de iPhone-opdracht begonnen met de regel "Emmer": die zegt niets, dus overslaan
+    if (item.bron === 'mail') text = text.replace(/^\s*(in (de )?)?emmer\s*(\n|$)/i, '') || text;
     if (item.bron === 'deelknop' || item.bron === 'mail') { var s = slimLabel(text); if (s) return kort(s); }
     var first = text.trim().split(/\n/)[0].trim().replace(/^✓ /, '');
     return kort(first.split(/\s+/).filter(Boolean).slice(0, 2).join(' '));
@@ -1486,25 +1488,61 @@
     }).then(null, function () {});       // brievenbus mag de gewone sync nooit blokkeren
   }
 
+  /* Mail van de iPhone-opdracht "In emmer" heeft altijd hetzelfde onderwerp ("Emmer").
+     Dat onderwerp zegt niets: dan telt alleen de inhoud van de mail (tekst, link of bijlage),
+     zodat het item in de wolk een slim onderwerp krijgt (persoon, bedrijf of actie). */
+  var NIETSZEGGEND_ONDERWERP = /^(emmer|in (de )?emmer|\(geen onderwerp\)|geen onderwerp)?$/i;
+
+  // Volledige platte tekst van één mail (bodyPreview is maar 255 tekens)
+  function mailTekst(m, H) {
+    return fetch(GRAPH + '/me/messages/' + encodeURIComponent(m.id) + '?$select=body',
+      { headers: Object.assign({ Prefer: 'outlook.body-content-type="text"' }, H) })
+      .then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { return ((j.body || {}).content || m.bodyPreview || ''); }, function () { return m.bodyPreview || ''; });
+  }
+  // Naam van de eerste bijlage (screenshot, foto, pdf) van één mail
+  function mailBijlage(m, H) {
+    if (!m.hasAttachments) return Promise.resolve('');
+    return fetch(GRAPH + '/me/messages/' + encodeURIComponent(m.id) + '/attachments?$select=name,isInline', { headers: H })
+      .then(function (r) { return r.ok ? r.json() : { value: [] }; })
+      .then(function (j) { var a = (j.value || [])[0]; return a ? a.name || 'bijlage' : ''; }, function () { return ''; });
+  }
+
   function haalMail() {
     return mailToken().then(function (mt) {
       if (!mt) return;
       var H = { Authorization: 'Bearer ' + mt };
       var url = GRAPH + '/me/mailFolders/inbox/messages?$top=50&$orderby=receivedDateTime desc' +
-        '&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,webLink,receivedDateTime';
+        '&$select=id,subject,from,toRecipients,ccRecipients,bodyPreview,webLink,receivedDateTime,hasAttachments';
       return fetch(url, { headers: H }).then(function (r) { return r.ok ? r.json() : { value: [] }; }).then(function (j) {
-        (j.value || []).forEach(function (m) {
-          var aan = (m.toRecipients || []).concat(m.ccRecipients || []).map(function (x) {
-            return ((x.emailAddress || {}).address || '').toLowerCase(); });
-          if (aan.indexOf(EMMER_ADRES) < 0) return;
-          var id = 'mail-' + m.id.slice(-24);
-          var onderwerp = (m.subject || '(geen onderwerp)').replace(/^\s*((fw|fwd|doorst|tr|wg)\s*:\s*)+/i, '').trim();
-          var notitie = (m.bodyPreview || '').split(/\r?\n/)[0].trim();
-          if (/^(van|from)\s*:/i.test(notitie)) notitie = '';          // geen eigen toelichting toegevoegd
-          nieuwItem(id, onderwerp + (notitie ? '\n' + notitie.slice(0, 300) : ''),
-            { bron: 'mail', link: m.webLink, created: Date.parse(m.receivedDateTime) || Date.now() });
-          opruimen.push({ soort: 'mail', m: m, H: H });
-        });
+        return (j.value || []).reduce(function (p, m) {
+          return p.then(function () {
+            var aan = (m.toRecipients || []).concat(m.ccRecipients || []).map(function (x) {
+              return ((x.emailAddress || {}).address || '').toLowerCase(); });
+            if (aan.indexOf(EMMER_ADRES) < 0) return;
+            var id = 'mail-' + m.id.slice(-24);
+            var extra = { bron: 'mail', link: m.webLink, created: Date.parse(m.receivedDateTime) || Date.now() };
+            var onderwerp = (m.subject || '').replace(/^\s*((fw|fwd|doorst|tr|wg)\s*:\s*)+/i, '').trim();
+            if (heeftItem(id)) { opruimen.push({ soort: 'mail', m: m, H: H }); return; }
+
+            if (NIETSZEGGEND_ONDERWERP.test(onderwerp)) {
+              // Via de iPhone-opdracht: de inhoud is het item
+              return Promise.all([mailTekst(m, H), mailBijlage(m, H)]).then(function (r) {
+                var tekst = schoonTekst(r[0], '').replace(/\n{3,}/g, '\n\n')
+                  .split('\n').filter(function (x) { return !/^(verzonden (vanaf|met)|sent from)/i.test(x.trim()); }).join('\n').trim();
+                if (!tekst && r[1]) tekst = '📎 ' + r[1];
+                else if (r[1]) tekst += '\n📎 ' + r[1];
+                nieuwItem(id, tekst || 'Uit de emmer-mail', extra);
+                opruimen.push({ soort: 'mail', m: m, H: H });
+              });
+            }
+
+            var notitie = (m.bodyPreview || '').split(/\r?\n/)[0].trim();
+            if (/^(van|from)\s*:/i.test(notitie)) notitie = '';          // geen eigen toelichting toegevoegd
+            nieuwItem(id, onderwerp + (notitie ? '\n' + notitie.slice(0, 300) : ''), extra);
+            opruimen.push({ soort: 'mail', m: m, H: H });
+          });
+        }, Promise.resolve());
       });
     }).then(null, function () {});
   }
