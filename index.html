@@ -417,8 +417,11 @@
   #archiveList .archdate { display: block; font-size: 11px; color: var(--muted, #8e8e93); margin-top: 2px; }
   #archiveList button {
     font: inherit; font-size: 12px; color: var(--accent);
-    background: none; border: 0; padding: 6px; cursor: pointer;
+    background: none; border: 0; padding: 8px 6px; cursor: pointer; white-space: nowrap;
   }
+  #archiveList .archknoppen { display: flex; flex-direction: column; align-items: flex-end; flex: none; }
+  #archiveList button.weg { color: #c0392b; }
+  #archiveList button.weg.zeker { font-weight: 600; background: rgba(192,57,43,.12); border-radius: 6px; }
 </style>
 </head>
 <body>
@@ -923,12 +926,12 @@
           cloud.appendChild(b);
         });
     }
-    var n = items.length - allActive.length;
+    var n = items.filter(function (i) { return i.archived && !i.deleted; }).length;
     $('archiveBtn').textContent = n ? 'archief (' + n + ')' : 'archief';
     if (query.trim()) {
       $('activeCount').textContent = active.length + ' van ' + allActive.length;
       // Ook treffers in het archief? Dan een linkje eronder.
-      var ah = items.filter(function (i) { return i.archived && matches(i); }).length;
+      var ah = items.filter(function (i) { return i.archived && !i.deleted && matches(i); }).length;
       if (ah) {
         var a = document.createElement('button');
         a.id = 'archHits';
@@ -1195,7 +1198,7 @@
   function renderArchive() {
     var list = $('archiveList');
     list.innerHTML = '';
-    var arch = items.filter(function (i) { return i.archived && matches(i); })
+    var arch = items.filter(function (i) { return i.archived && !i.deleted && matches(i); })
       .sort(function (a, b) { return (b.archivedAt || 0) - (a.archivedAt || 0); });
     var af = $('archFilter');
     af.style.display = query.trim() ? 'block' : 'none';
@@ -1220,7 +1223,31 @@
         touch(it);
         save(); render(); renderArchive();
       });
-      li.appendChild(s); li.appendChild(b); list.appendChild(li);
+      // Definitief verwijderen: twee keer tikken. Het item blijft als leeg "grafsteentje"
+      // (alleen id en herkenningsgegevens) bestaan, zodat sync het niet terughaalt
+      // van een ander toestel en een al verwerkte mail niet opnieuw een item wordt.
+      var d = document.createElement('button');
+      d.className = 'weg';
+      d.textContent = 'definitief verwijderen';
+      var timer = null;
+      d.addEventListener('click', function () {
+        if (!d.classList.contains('zeker')) {
+          d.classList.add('zeker'); d.textContent = 'zeker weten?';
+          timer = setTimeout(function () { d.classList.remove('zeker'); d.textContent = 'definitief verwijderen'; }, 4000);
+          return;
+        }
+        clearTimeout(timer);
+        Object.keys(it).forEach(function (k) {
+          if (['id', 'created', 'mid', 'bron'].indexOf(k) < 0) delete it[k];
+        });
+        it.archived = true; it.deleted = true; it.text = '';
+        touch(it);
+        save(); render(); renderArchive();
+      });
+      var kn = document.createElement('div');
+      kn.className = 'archknoppen';
+      kn.appendChild(b); kn.appendChild(d);
+      li.appendChild(s); li.appendChild(kn); list.appendChild(li);
     });
   }
   $('archiveBtn').addEventListener('click', function () { renderArchive(); archDlg.showModal(); });
