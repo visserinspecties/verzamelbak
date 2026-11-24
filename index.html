@@ -340,6 +340,26 @@
   }
   #itemSuggest .kand button.ja { color: #2e7d32; }
   #itemSuggest .link { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 8px 0; cursor: pointer; text-decoration: underline; }
+  /* Doorgestuurde mail lezen in de app zelf (geen aanmelden bij Outlook op het web nodig) */
+  #itemDlg { max-height: 92vh; overflow-y: auto; }
+  #itemMail { margin-top: 10px; }
+  #itemMail:empty { display: none; }
+  #itemMail .mailknop { width: 100%; }
+  #itemMail .mailstatus { font-size: 13px; color: var(--ink-soft); margin: 8px 0; }
+  #itemMail .mailkop { font-size: 13px; color: var(--ink-soft); line-height: 1.45; overflow-wrap: anywhere; margin: 4px 0 0; }
+  #itemMail .mailkop b { color: var(--ink); font-weight: 600; }
+  #itemMail .mailbody {
+    white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; line-height: 1.5;
+    max-height: 45vh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-top: 8px;
+  }
+  #itemMail .bijlage {
+    display: block; width: 100%; text-align: left; font: inherit; font-size: 14px;
+    padding: 12px; margin-top: 6px; border: 1px dashed var(--line); border-radius: 12px;
+    background: none; color: var(--ink); text-decoration: none; cursor: pointer; overflow-wrap: anywhere;
+  }
+  #itemMail img { max-width: 100%; border-radius: 8px; margin-top: 6px; display: block; }
+  #itemMail .weblink { font-size: 12px; color: var(--ink-soft); display: inline-block; padding: 10px 0; }
   /* pennetje achter de naam: contactpersoon in Outlook aanpassen (klein icoon, groot tikvlak) */
   #itemSuggest .kand button.pen {
     width: 40px; height: 34px; margin: -8px -6px -8px 0; vertical-align: middle;
@@ -479,6 +499,7 @@
   <div class="catline" id="itemCats"></div>
   <div id="itemSuggest" aria-live="polite"></div>
   <p class="meta"><a id="itemLink" target="_blank" rel="noopener" style="display:none;color:inherit"></a></p>
+  <div id="itemMail" aria-live="polite"></div>
   <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button><button id="itemDueBlink" type="button" style="display:none">knipper weer</button></div>
   <div id="viewRows">
     <div class="row">
@@ -1077,8 +1098,10 @@
   function showItem(it) {
     fillLines($('itemText'), it.text, true);
     var lnk = $('itemLink');
-    if (it.link) { lnk.href = it.link; lnk.textContent = it.bron === 'mail' ? '↗ Mail openen in Outlook' : '↗ Openen'; lnk.style.display = 'inline'; }
+    // Mail: geen link naar Outlook op het web meer, maar "Mail lezen" in de app zelf (zie toonMail)
+    if (it.link && it.bron !== 'mail') { lnk.href = it.link; lnk.textContent = '↗ Openen'; lnk.style.display = 'inline'; }
     else lnk.style.display = 'none';
+    toonMail(it);
     $('itemMeta').textContent = (it.bron === 'mail' ? 'Doorgestuurde mail · ' : it.bron === 'deelknop' ? 'Via de deelknop · ' : '') + 'Erin gegooid op ' + new Date(it.created).toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) + (it.text.indexOf('\n') > -1 ? ' · tik op een regel om af te vinken' : '');
     var di = dueInfo(it.due), line = $('itemDueLine');
     line.style.display = di ? 'flex' : 'none';
@@ -1670,6 +1693,132 @@
   function gget(t, pad, extraHeaders) {
     return fetch(GRAPH + pad, { headers: Object.assign({ Authorization: 'Bearer ' + t }, extraHeaders || {}) })
       .then(function (r) { return r.ok ? r.json() : { value: [] }; }, function () { return { value: [] }; });
+  }
+
+  /* ---------- doorgestuurde mail lezen in de Verzamelbak zelf ----------
+     Vroeger stond hier een link naar Outlook op het web. Op de iPhone opent die in een losse
+     Safari-laag waar je niet aangemeld bent (aanmelden liep vast), en de bewaarde link klopte
+     niet meer zodra de mail naar de map Emmer verhuisde: bij verhuizen krijgt een mail een nieuw id.
+     Nu haalt de app de mail zelf op met de toestemming die hij al heeft (Mail.ReadWrite) en zoekt
+     hem op het vaste internet-bericht-id (blijft gelijk bij verhuizen). Oude items zonder dat id:
+     zoeken op ontvangsttijd. De mailtekst wordt als platte tekst getoond, nooit als HTML. */
+  var mailCache = {}, mailOpenId = null;
+  function toonMail(it) {
+    var box = $('itemMail'); box.innerHTML = '';
+    if (it.bron !== 'mail') { mailOpenId = null; return; }
+    // al opengeklapt (bv. na afvinken van een regel): open laten
+    if (mailOpenId === it.id && mailCache[it.id]) { tekenMail(mailCache[it.id], box); return; }
+    mailOpenId = null;
+    var knop = document.createElement('button');
+    knop.type = 'button'; knop.className = 'btn mailknop'; knop.textContent = '✉ Mail lezen';
+    knop.addEventListener('click', function () { laadMail(it, box); });
+    box.appendChild(knop);
+  }
+  function mailStatus(box, tekst) {
+    box.innerHTML = '';
+    var p = document.createElement('p'); p.className = 'mailstatus'; p.textContent = tekst;
+    box.appendChild(p);
+  }
+  function zoekMailOp(it, t) {
+    var filter = it.mid
+      ? "internetMessageId eq '" + String(it.mid).replace(/'/g, "''") + "'"
+      : 'receivedDateTime eq ' + new Date(it.created).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    return gget(t, '/me/messages?$filter=' + encodeURIComponent(filter) +
+      '&$select=id,subject,from,receivedDateTime,body,webLink,hasAttachments&$top=1',
+      { Prefer: 'outlook.body-content-type="text"' })
+      .then(function (j) { return (j.value || [])[0] || null; });
+  }
+  function mailBijlagen(t, id) {
+    return gget(t, '/me/messages/' + encodeURIComponent(id) + '/attachments?$select=id,name,contentType,size,isInline')
+      .then(function (j) {
+        // kleine plaatjes in de tekst (logo's in een handtekening) overslaan
+        return (j.value || []).filter(function (a) { return !(a.isInline && (a.size || 0) < 15000); });
+      });
+  }
+  function laadMail(it, box) {
+    var id = it.id;
+    mailStatus(box, 'Mail ophalen…');
+    (mailCache[id] ? Promise.resolve(mailCache[id]) : scopedToken(MAIL_SCOPE).then(function (t) {
+      if (!t) return { fout: 'Geen toegang tot je mail. Tik eerst op sync (links onder) en probeer het dan opnieuw.' };
+      return zoekMailOp(it, t).then(function (m) {
+        if (!m) return { fout: 'Deze mail is niet (meer) gevonden in Outlook. Misschien is hij verwijderd.' };
+        return (m.hasAttachments ? mailBijlagen(t, m.id) : Promise.resolve([])).then(function (b) { return { m: m, bijlagen: b }; });
+      });
+    })).then(function (r) {
+      if (currentId !== id) return;                 // intussen een ander item geopend
+      if (r.fout) { mailStatus(box, r.fout); return; }
+      mailCache[id] = r; mailOpenId = id;
+      tekenMail(r, box);
+    }, function () { if (currentId === id) mailStatus(box, 'Mail ophalen lukte niet. Heb je internet?'); });
+  }
+  function tekenMail(r, box) {
+    var m = r.m; box.innerHTML = '';
+    var van = (m.from || {}).emailAddress || {};
+    var kop = document.createElement('p'); kop.className = 'mailkop';
+    function regel(label, waarde) {
+      if (!waarde) return;
+      var b = document.createElement('b'); b.textContent = label + ' ';
+      kop.appendChild(b); kop.appendChild(document.createTextNode(waarde)); kop.appendChild(document.createElement('br'));
+    }
+    regel('Van', van.name && van.address && van.name !== van.address ? van.name + ' <' + van.address + '>' : (van.address || van.name));
+    regel('Datum', m.receivedDateTime ? new Date(m.receivedDateTime).toLocaleString('nl-NL',
+      { weekday: 'short', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : '');
+    regel('Onderwerp', m.subject || '(geen onderwerp)');
+    box.appendChild(kop);
+
+    var body = document.createElement('div'); body.className = 'mailbody';
+    body.textContent = String(((m.body || {}).content) || '').replace(/\r/g, '').replace(/\n{3,}/g, '\n\n').trim() || '(lege mail)';
+    box.appendChild(body);
+
+    (r.bijlagen || []).forEach(function (a) {
+      var isBestand = !a['@odata.type'] || /fileAttachment/i.test(a['@odata.type']);
+      if (!isBestand) {                              // bv. een als bijlage doorgestuurde mail
+        var s = document.createElement('div'); s.className = 'bijlage'; s.textContent = '📎 ' + (a.name || 'bijlage');
+        box.appendChild(s); return;
+      }
+      if (/^image\//i.test(a.contentType || '')) { toonPlaatje(m.id, a, box); return; }
+      var knop = document.createElement('button'); knop.type = 'button'; knop.className = 'bijlage';
+      knop.textContent = '📎 ' + (a.name || 'bijlage') + ' — tik om op te halen';
+      knop.addEventListener('click', function () { haalBijlage(m.id, a, knop); });
+      box.appendChild(knop);
+    });
+
+    if (m.webLink) {
+      var w = document.createElement('a'); w.className = 'weblink';
+      w.href = m.webLink; w.target = '_blank'; w.rel = 'noopener';
+      w.textContent = '↗ Toch openen in Outlook op het web (vraagt soms om aanmelden)';
+      box.appendChild(w);
+    }
+  }
+  function bijlageBlob(mailId, a) {
+    return scopedToken(MAIL_SCOPE).then(function (t) {
+      if (!t) throw new Error('geen toegang');
+      return fetch(GRAPH + '/me/messages/' + encodeURIComponent(mailId) + '/attachments/' + encodeURIComponent(a.id) + '/$value',
+        { headers: { Authorization: 'Bearer ' + t } });
+    }).then(function (res) {
+      if (!res.ok) throw new Error('fout ' + res.status);
+      return res.blob();
+    }).then(function (b) {
+      return a.contentType && (!b.type || b.type === 'application/octet-stream') ? new Blob([b], { type: a.contentType }) : b;
+    });
+  }
+  function toonPlaatje(mailId, a, box) {
+    var img = document.createElement('img'); img.alt = a.name || 'bijlage';
+    box.appendChild(img);
+    bijlageBlob(mailId, a).then(function (b) { img.src = URL.createObjectURL(b); },
+      function () { img.replaceWith(Object.assign(document.createElement('div'), { className: 'bijlage', textContent: '📎 ' + (a.name || 'plaatje') + ' (ophalen lukte niet)' })); });
+  }
+  // Twee tikken: eerst ophalen, dan openen. Zo opent de iPhone het bestand direct vanuit jouw tik.
+  function haalBijlage(mailId, a, knop) {
+    knop.disabled = true; knop.textContent = '📎 ' + (a.name || 'bijlage') + ' — ophalen…';
+    bijlageBlob(mailId, a).then(function (b) {
+      var l = document.createElement('a'); l.className = 'bijlage';
+      l.href = URL.createObjectURL(b); l.target = '_blank'; l.rel = 'noopener';
+      l.textContent = '📎 ' + (a.name || 'bijlage') + ' — tik om te openen';
+      knop.replaceWith(l);
+    }, function () {
+      knop.disabled = false; knop.textContent = '📎 ' + (a.name || 'bijlage') + ' — ophalen lukte niet, tik om opnieuw te proberen';
+    });
   }
 
   var ACTIEWOORD = /^(bel|bellen|terugbellen|gebeld|mail|mailen|mailtje|afspraak|afspreken|whatsapp|appen|appje|spreken|contact|overleg|overleggen|bespreken|vragen|vraag|terugkoppelen|sturen|met|over|en|van|voor|nog|even)$/i;
