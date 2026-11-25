@@ -1455,11 +1455,37 @@
       var cur = map[it.id];
       if (!cur || stamp(it) > stamp(cur)) map[it.id] = it;
     });
-    return Object.keys(map).map(function (k) {
+    var lijst = Object.keys(map).map(function (k) {
       var it = map[k];
       if (!it.updated) it.updated = stamp(it);
       return it;
     });
+    return ontdubbelMail(lijst);
+  }
+
+  /* Dezelfde mail kan twee items opleveren als twee toestellen hem tegelijk verwerken
+     (de mail krijgt bij het verplaatsen een ander id). Items met hetzelfde internet-bericht-id
+     zijn dus dubbel: het item met de laatste wijziging blijft, de rest wordt een grafsteentje.
+     Het grafsteentje krijgt de tijd van het winnende item (niet "nu"), zodat alle toestellen
+     op hetzelfde uitkomen en er geen eindeloze heen-en-weer-sync ontstaat. */
+  function ontdubbelMail(lijst) {
+    var perMid = {};
+    lijst.forEach(function (it) {
+      if (it.mid && !it.deleted) (perMid[it.mid] = perMid[it.mid] || []).push(it);
+    });
+    Object.keys(perMid).forEach(function (mid) {
+      var groep = perMid[mid];
+      if (groep.length < 2) return;
+      groep.sort(function (x, y) { return stamp(y) - stamp(x) || (x.id < y.id ? -1 : 1); });
+      var winnaar = groep[0];
+      groep.slice(1).forEach(function (it) {
+        Object.keys(it).forEach(function (k) {
+          if (['id', 'created', 'mid', 'bron'].indexOf(k) < 0) delete it[k];
+        });
+        it.archived = true; it.deleted = true; it.text = ''; it.updated = stamp(winnaar);
+      });
+    });
+    return lijst;
   }
 
   // Vaste volgorde en vaste sleutelvolgorde, zodat gelijke lijsten ook gelijk uitkomen
@@ -1569,12 +1595,27 @@
     });
   }
 
+  /* Twee keer dezelfde tekst in de emmer gegooid (bv. twee keer op "In emmer" getikt)?
+     Dan maar één item. We kijken naar items van de laatste 24 uur met precies dezelfde
+     eerste 200 tekens als het voorbeeld van de mail, ook als dat item al gearchiveerd is. */
+  function zelfdeTekstAl(m) {
+    var kern = function (t) { return String(t || '').replace(/\s+/g, ' ').trim().slice(0, 200); };
+    var voorbeeld = kern(m.bodyPreview);
+    if (voorbeeld.length < 40) return false;            // korte berichtjes mogen best twee keer
+    var tijd = Date.parse(m.receivedDateTime) || Date.now();
+    return items.some(function (i) {
+      return i.bron === 'mail' && !i.deleted && Math.abs((i.created || 0) - tijd) < 864e5 &&
+        kern(i.text).slice(0, voorbeeld.length) === voorbeeld;
+    });
+  }
+
   function verwerkMail(m, H, verplaatsen) {
     var aan = (m.toRecipients || []).concat(m.ccRecipients || []).map(function (x) {
       return ((x.emailAddress || {}).address || '').toLowerCase(); });
     if (aan.indexOf(EMMER_ADRES) < 0) return;
     var klaar = function () { if (verplaatsen) opruimen.push({ soort: 'mail', m: m, H: H }); };
     if (heeftMail(m)) { klaar(); return; }
+    if (zelfdeTekstAl(m)) { klaar(); return; }
     var id = 'mail-' + m.id.slice(-24);
     var extra = { bron: 'mail', link: m.webLink, created: Date.parse(m.receivedDateTime) || Date.now(), mid: m.internetMessageId };
     var onderwerp = (m.subject || '').replace(/^\s*((fw|fwd|doorst|tr|wg)\s*:\s*)+/i, '').trim();
