@@ -132,6 +132,12 @@
   .dueline.now { color: var(--accent); }
   .dueline button { font: inherit; font-size: 12px; color: var(--ink-soft); background: none; border: 0; padding: 10px; margin: -10px 0; cursor: pointer; text-decoration: underline; }
   .dueline button.aan { color: var(--accent); }
+  /* Herhalen: klein keuzelijstje in de deadlineregel */
+  .repline { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 13px; color: var(--ink-soft); min-height: 24px; flex-wrap: wrap; }
+  .repline select { font: inherit; font-size: 13px; color: var(--ink-soft); background: transparent; border: 1px solid rgba(128,128,128,.35); border-radius: 6px; padding: 6px 4px; }
+  .repline select.aan { color: var(--accent); border-color: var(--accent); }
+  .repline input { font: inherit; font-size: 14px; width: 3.2em; padding: 5px 4px; border: 1px solid rgba(128,128,128,.35); border-radius: 6px; background: transparent; color: inherit; text-align: center; }
+  #repList li span { flex: 1; font-size: 14px; }
   .addrow { display: flex; align-items: center; margin-top: 4px; }
   .addrow .ico { width: 44px; height: 44px; margin-left: -10px; }
   #editText { margin-top: 2px; }
@@ -448,14 +454,15 @@
   .meta { font-size: 12px; color: var(--ink-soft); margin: 0; }
 
   /* Archief */
+  #archiveList2 { list-style: none; margin: 0; padding: 0; }
   #archiveList { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow: auto; }
-  #archiveList li {
+  #archiveList li, #archiveList2 li {
     display: flex; gap: 10px; align-items: center;
     padding: 10px 0; border-bottom: 1px solid var(--line);
   }
-  #archiveList li span { flex: 1; font-size: 14px; overflow-wrap: anywhere; }
-  #archiveList .archdate { display: block; font-size: 11px; color: var(--muted, #8e8e93); margin-top: 2px; }
-  #archiveList button {
+  #archiveList li span, #archiveList2 li span { flex: 1; font-size: 14px; overflow-wrap: anywhere; }
+  #archiveList .archdate, #archiveList2 .archdate { display: block; font-size: 11px; color: var(--muted, #8e8e93); margin-top: 2px; }
+  #archiveList button, #archiveList2 button {
     font: inherit; font-size: 12px; color: var(--accent);
     background: none; border: 0; padding: 8px 6px; cursor: pointer; white-space: nowrap;
   }
@@ -524,6 +531,21 @@
   <p class="meta"><a id="itemLink" target="_blank" rel="noopener" style="display:none;color:inherit"></a></p>
   <div id="itemMail" aria-live="polite"></div>
   <div class="dueline" id="itemDueLine" style="display:none"><span id="itemDueTxt"></span><button id="itemDueClear" type="button">wis</button><button id="itemDueBlink" type="button" style="display:none">knipper weer</button></div>
+  <div class="repline" id="itemRepLine">
+    <span>↻</span>
+    <select id="itemRep" aria-label="Herhalen">
+      <option value="">niet herhalen</option>
+      <option value="1d">elke dag</option>
+      <option value="1w">elke week</option>
+      <option value="2w">elke 2 weken</option>
+      <option value="1m">elke maand</option>
+      <option value="3m">elk kwartaal</option>
+      <option value="6m">elk half jaar</option>
+      <option value="1j">elk jaar</option>
+      <option value="xd">om de … dagen</option>
+    </select>
+    <span id="itemRepDagen" style="display:none">om de <input type="number" id="itemRepN" min="2" max="365" inputmode="numeric"> dagen</span>
+  </div>
   <div id="viewRows">
     <div class="row">
       <button class="btn" id="itemUp">Belangrijker</button>
@@ -548,6 +570,11 @@
   <p class="meta" id="archFilter" style="display:none;margin:-6px 0 8px"></p>
   <ul id="archiveList"></ul>
   <p class="meta" id="archEmpty">Niets in het archief.</p>
+  <div id="repBlok" style="display:none">
+    <h2 style="margin-top:18px">Herhalend</h2>
+    <p class="meta" style="margin:-6px 0 8px">Verschijnt vanzelf in de wolk op de dag dat het weer moet.</p>
+    <ul id="archiveList2" class="replijst"></ul>
+  </div>
   <div class="row">
     <button class="btn quiet" id="archClose">Sluit</button>
   </div>
@@ -844,6 +871,44 @@
     return !!(di && di.now && it.dueSeen !== it.due);
   }
 
+  /* ---------- herhalen ----------
+     it.rep = { n: 6, u: 'd' }  (u: d = dagen, w = weken, m = maanden, j = jaren; kwartaal = 3 maanden).
+     Een herhalend item heeft altijd een datum. Tot die datum staat het niet in de wolk;
+     op de dag zelf verschijnt het en knippert het. "Gedaan" schuift de datum door naar de
+     volgende keer (vanaf de oude datum, zodat het ritme blijft: elke 6 dagen blijft elke 6 dagen). */
+  function fmtDue(d) {
+    return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+  }
+  function vandaag() { var t = new Date(); t.setHours(0, 0, 0, 0); return t; }
+  function volgendeKeer(it, vanaf) {
+    var r = it.rep, d = parseDue(it.due) || vandaag();
+    if (!r || !(r.n > 0)) return null;
+    var dag = r.dag || d.getDate(), stap = 0;
+    function plus(k) {
+      if (r.u === 'd' || r.u === 'w') { var x = new Date(d); x.setDate(x.getDate() + k * r.n * (r.u === 'w' ? 7 : 1)); return x; }
+      var mnd = d.getMonth() + k * r.n * (r.u === 'j' ? 12 : 1);
+      var j = d.getFullYear() + Math.floor(mnd / 12); mnd = ((mnd % 12) + 12) % 12;
+      var laatste = new Date(j, mnd + 1, 0).getDate();      // 31 jan + 1 maand = 28/29 feb, daarna weer de 31e
+      return new Date(j, mnd, Math.min(dag, laatste));
+    }
+    var x;
+    do { stap++; x = plus(stap); } while (x <= vanaf && stap < 5000);
+    return fmtDue(x);
+  }
+  function repTekst(r) {
+    if (!r) return '';
+    if (r.u === 'm' && r.n === 3) return 'elk kwartaal';
+    if (r.u === 'm' && r.n === 6) return 'elk half jaar';
+    var een = { d: 'elke dag', w: 'elke week', m: 'elke maand', j: 'elk jaar' };
+    var meer = { d: 'dagen', w: 'weken', m: 'maanden', j: 'jaar' };
+    return r.n === 1 ? een[r.u] : 'om de ' + r.n + ' ' + meer[r.u];
+  }
+  // Herhalend en de datum is nog niet aangebroken: (nog) niet in de wolk
+  function wacht(it) {
+    var d = parseDue(it.due);
+    return !!(it.rep && d && d > vandaag());
+  }
+
   /* ---------- zoeken ----------
      Zoekt in de hele tekst (niet alleen de twee woorden in de wolk), zonder op hoofdletters
      of accenten te letten. Meerdere woorden: alle woorden moeten erin voorkomen. */
@@ -926,7 +991,7 @@
   $('catInfo').addEventListener('click', function () { filterCat = null; render(); });
 
   function render() {
-    var allActive = items.filter(function (i) { return !i.archived; });
+    var allActive = items.filter(function (i) { return !i.archived && (query.trim() || !wacht(i)); });
     var active = allActive.filter(matches).filter(inFilter);
     tekenCatBar();
     cloud.innerHTML = '';
@@ -964,7 +1029,7 @@
           if (di || oc !== null) {
             var ds = document.createElement('span');
             ds.className = 'due' + (di && di.now ? ' now' : '') + (di && blinks(item) ? ' blink' : '');
-            ds.textContent = [di ? di.text : '', oc !== null ? oc + ' open' : ''].filter(Boolean).join(' · ');
+            ds.textContent = [di ? di.text + (item.rep ? ' ↻' : '') : '', oc !== null ? oc + ' open' : ''].filter(Boolean).join(' · ');
             b.appendChild(ds);
           }
 
@@ -1155,6 +1220,7 @@
     kb.style.display = di && di.now ? '' : 'none';
     kb.textContent = blinks(it) ? 'knippert ✓' : 'knipper weer';
     kb.className = blinks(it) ? 'aan' : '';
+    toonRep(it);
     $('itemHl').className = 'ico' + (it.hl ? ' on' : '');
     toonItemCats(it);
     toonSuggesties(it);
@@ -1222,7 +1288,8 @@
   $('itemDue').addEventListener('change', function () {
     var it = find(currentId); if (!it) return;
     var v = $('itemDue').value;
-    if (parseDue(v)) it.due = v; else delete it.due;
+    if (parseDue(v)) { it.due = v; if (it.rep) it.rep.dag = parseDue(v).getDate(); }
+    else { delete it.due; delete it.rep; }
     touch(it); save(); render(); showItem(it);
   });
   $('itemDueBlink').addEventListener('click', function () {
@@ -1241,7 +1308,7 @@
   });
   $('itemDueClear').addEventListener('click', function () {
     var it = find(currentId); if (!it) return;
-    delete it.due; touch(it); save(); render(); showItem(it);
+    delete it.due; delete it.rep; touch(it); save(); render(); showItem(it);
   });
   function bump(d) {
     var it = find(currentId); if (!it) return;
@@ -1253,8 +1320,52 @@
   $('itemDown').addEventListener('click', function () { bump(-1); });
   $('itemDone').addEventListener('click', function () {
     var it = find(currentId);
-    if (it) { it.archived = true; it.archivedAt = Date.now(); touch(it); save(); render(); }
+    if (it && it.rep && it.due) {
+      // Herhalend: niet naar het archief, maar door naar de volgende keer
+      it.due = volgendeKeer(it, vandaag()); delete it.dueSeen;
+      touch(it); save(); render();
+    } else if (it) { it.archived = true; it.archivedAt = Date.now(); touch(it); save(); render(); }
     itemDlg.close();
+  });
+
+  // Herhalen kiezen
+  function toonRep(it) {
+    var sel = $('itemRep'), r = it.rep, v = '';
+    if (r) {
+      v = r.n + r.u;
+      if (!sel.querySelector('option[value="' + v + '"]')) v = r.u === 'd' ? 'xd' : '';
+    }
+    sel.value = v;
+    sel.className = r ? 'aan' : '';
+    $('itemRepDagen').style.display = v === 'xd' ? '' : 'none';
+    if (v === 'xd') $('itemRepN').value = r.n;
+    var done = $('itemDone');
+    done.textContent = (r && it.due) ? 'Gedaan → volgende keer ' + dueInfo(volgendeKeer(it, vandaag())).text : 'Opgepakt / weg ermee';
+  }
+  function zetRep(it, n, u) {
+    if (!n) { delete it.rep; }
+    else {
+      if (!parseDue(it.due)) it.due = fmtDue(vandaag());      // herhalen zonder datum: vanaf vandaag
+      it.rep = { n: n, u: u, dag: parseDue(it.due).getDate() };
+    }
+    touch(it); save(); render(); showItem(it);
+  }
+  $('itemRep').addEventListener('change', function () {
+    var it = find(currentId); if (!it) return;
+    var v = $('itemRep').value;
+    if (!v) return zetRep(it, 0);
+    if (v === 'xd') {
+      $('itemRepDagen').style.display = '';
+      var nn = parseInt($('itemRepN').value, 10) || (it.rep && it.rep.u === 'd' ? it.rep.n : 6);
+      $('itemRepN').value = nn;
+      return zetRep(it, nn, 'd');
+    }
+    zetRep(it, parseInt(v, 10), v.slice(-1));
+  });
+  $('itemRepN').addEventListener('change', function () {
+    var it = find(currentId); if (!it) return;
+    var nn = Math.max(1, Math.min(365, parseInt($('itemRepN').value, 10) || 0));
+    if (nn) zetRep(it, nn, 'd');
   });
   $('itemClose').addEventListener('click', function () { itemDlg.close(); });
 
@@ -1270,6 +1381,22 @@
     af.textContent = 'Gefilterd op "' + query.trim() + '"';
     $('archEmpty').textContent = query.trim() ? 'Niets gevonden in het archief.' : 'Niets in het archief.';
     $('archEmpty').style.display = arch.length ? 'none' : 'block';
+    var reps = items.filter(function (i) { return !i.archived && i.rep && matches(i); })
+      .sort(function (a, b) { return (a.due || '') < (b.due || '') ? -1 : 1; });
+    $('repBlok').style.display = reps.length ? '' : 'none';
+    var rl = $('archiveList2'); rl.innerHTML = '';
+    reps.forEach(function (it) {
+      var li = document.createElement('li');
+      var s = document.createElement('span');
+      s.textContent = shortLabel(it) || String(it.text).split('\n')[0];
+      var dd = document.createElement('span'); dd.className = 'archdate';
+      var dt = (dueInfo(it.due) || {}).text;
+      dd.textContent = repTekst(it.rep) + ' · ' + (wacht(it) ? 'volgende keer ' + dt : 'staat nu in de wolk (' + dt + ')');
+      s.appendChild(dd);
+      var b = document.createElement('button'); b.textContent = 'openen';
+      b.addEventListener('click', function () { archDlg.close(); openItem(it.id); });
+      li.appendChild(s); li.appendChild(b); rl.appendChild(li);
+    });
     arch.forEach(function (it) {
       var li = document.createElement('li');
       var s = document.createElement('span');
